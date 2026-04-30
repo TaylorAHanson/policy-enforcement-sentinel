@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks
+from pydantic import BaseModel
 from typing import Dict, Any, List
 import uuid
 import datetime
@@ -9,6 +10,38 @@ router = APIRouter()
 # In-memory run store for simplicity since we stripped the database tables
 # You can upgrade this to SQLite if needed
 run_history = []
+
+class EnforcementActionRequest(BaseModel):
+    resource_id: str
+    resource_type: str
+    action: str
+    policy_name: str
+    reason: str = "Manual execution via UI"
+
+@router.post("/runs/{run_id}/enforcement-action")
+async def execute_enforcement_action(run_id: str, payload: EnforcementActionRequest):
+    # Verify run exists
+    run = None
+    for r in run_history:
+        if r["id"] == run_id:
+            run = r
+            break
+            
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+        
+    svc = SentinelService()
+    result = await svc.execute_action(
+        action=payload.action,
+        resource_type=payload.resource_type,
+        resource_id=payload.resource_id,
+        reason=payload.reason
+    )
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to execute action"))
+        
+    return result
 
 @router.post("/run")
 async def trigger_run(background_tasks: BackgroundTasks, workspace: str = "ws-enterprise-prod", env: str = "prod", mode: str = "audit"):

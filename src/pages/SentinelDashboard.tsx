@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Play, Activity, RefreshCw, ShieldAlert, AlertTriangle, CheckCircle2, FileStack, ShieldCheck, ListChecks, X, Search, ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { RefreshCw, ShieldAlert, AlertTriangle, CheckCircle2, FileStack, ShieldCheck, ListChecks, X, Search, ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
 
 const formatReason = (v: any) => {
     if (v.violation_reasons && Array.isArray(v.violation_reasons) && v.violation_reasons.length > 0) {
@@ -25,6 +25,10 @@ export default function SentinelDashboard() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<string>('all');
+  
+  const [executedActions, setExecutedActions] = useState<Record<string, { at: string }>>({});
+  const [selectedViolation, setSelectedViolation] = useState<any | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -59,6 +63,37 @@ export default function SentinelDashboard() {
     } finally {
       setTriggering(false);
     }
+  };
+
+  const handleExecuteAction = async (runId: string, v: any) => {
+      setActionLoading(v.resource_id);
+      try {
+          const res = await fetch(`/api/v1/sentinel/runs/${runId}/enforcement-action`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  resource_id: v.resource_id,
+                  resource_type: v.resource_type,
+                  action: v.action,
+                  policy_name: v.policy,
+                  reason: v.reason
+              })
+          });
+          
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || 'Failed to execute action');
+          
+          setExecutedActions(prev => ({
+              ...prev,
+              [`${runId}-${v.resource_id}-${v.policy}-${v.action}`]: { at: new Date().toLocaleString() }
+          }));
+      } catch (e: any) {
+          console.error(e);
+          alert(`Error executing action: ${e.message}`);
+      } finally {
+          setActionLoading(null);
+          setSelectedViolation(null);
+      }
   };
 
   const getRunStatus = (run: any) => {
@@ -241,8 +276,6 @@ export default function SentinelDashboard() {
                   {(() => {
                       const violations: any[] = activeRun.results?.violations || [];
                       const assetsScanned = activeRun.results?.total_scanned ?? '—';
-                      const policiesEvaluated = activeRun.results?.policies_evaluated ?? '—';
-                      const totalChecks = activeRun.results?.total_checks ?? '—';
                       const vCount = activeRun.results?.total_violations ?? violations.length;
 
                       // Group violations by policy
@@ -392,7 +425,10 @@ export default function SentinelDashboard() {
                                                               {activeTab === 'all' && <th className="p-4 text-left">Policy</th>}
                                                               <th className="p-4 text-left">Severity</th>
                                                               <th className="p-4 text-left">Action</th>
-                                                              <th className="p-4 pr-6 text-left w-1/2">Reason</th>
+                                                              <th className="p-4 text-left w-1/3">Reason</th>
+                                                              {activeRun.mode === 'audit' && (
+                                                                  <th className="p-4 pr-6 text-right">Controls</th>
+                                                              )}
                                                           </tr>
                                                       </thead>
                                                       <tbody className="divide-y divide-gray-100">
@@ -424,9 +460,35 @@ export default function SentinelDashboard() {
                                                                            'bg-gray-100 text-gray-700'
                                                                       }`}>{v.action}</span>
                                                                   </td>
-                                                                  <td className="p-4 pr-6 text-sm text-gray-600 break-words leading-relaxed align-top">
+                                                                  <td className="p-4 text-sm text-gray-600 break-words leading-relaxed align-top">
                                                                       {formatReason(v)}
                                                                   </td>
+                                                                  {activeRun.mode === 'audit' && (
+                                                                      <td className="p-4 pr-6 text-right align-top">
+                                                                          {(() => {
+                                                                              const execKey = `${activeRun.id}-${v.resource_id}-${v.policy}-${v.action}`;
+                                                                              const executed = executedActions[execKey];
+                                                                              if (executed) {
+                                                                                  return (
+                                                                                      <div className="flex flex-col items-end mt-1">
+                                                                                          <span className="text-xs font-semibold text-green-600 flex items-center">
+                                                                                              <CheckCircle2 className="w-3 h-3 mr-1" /> Executed
+                                                                                          </span>
+                                                                                          <span className="text-[10px] text-gray-500 mt-0.5">by you on {executed.at}</span>
+                                                                                      </div>
+                                                                                  );
+                                                                              }
+                                                                              return ['KILL', 'WARN', 'CERTIFY', 'UNCERTIFY'].includes(v.action) && (
+                                                                                  <button 
+                                                                                      className="inline-flex items-center justify-center rounded-md text-xs font-medium border border-blue-200 text-blue-600 hover:bg-blue-50 h-7 px-2 mt-0.5"
+                                                                                      onClick={() => setSelectedViolation(v)}
+                                                                                  >
+                                                                                      Review and Act
+                                                                                  </button>
+                                                                              );
+                                                                          })()}
+                                                                      </td>
+                                                                  )}
                                                               </tr>
                                                           ))}
                                                       </tbody>
@@ -473,6 +535,61 @@ export default function SentinelDashboard() {
             </div>
           </div>
         </div>
+      )}
+      {/* Review and Act Modal */}
+      {selectedViolation && activeRun && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+                  <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-white shrink-0">
+                      <h3 className="text-lg font-semibold text-gray-900">Review and Act: {selectedViolation.resource_id}</h3>
+                      <button onClick={() => setSelectedViolation(null)} className="p-2 rounded-full hover:bg-gray-100 transition-colors">
+                          <X className="w-5 h-5 text-gray-500" />
+                      </button>
+                  </div>
+                  <div className="p-6 overflow-y-auto flex-1 space-y-6">
+                      <div className="grid grid-cols-2 gap-4 text-sm bg-gray-50 p-4 rounded-lg border border-gray-100">
+                          <div><span className="font-semibold text-gray-500 block mb-1">Resource Type</span> {selectedViolation.resource_type}</div>
+                          <div><span className="font-semibold text-gray-500 block mb-1">Policy</span> {selectedViolation.policy}</div>
+                          <div>
+                              <span className="font-semibold text-gray-500 block mb-1">Severity</span>
+                              <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded-full ${
+                                  selectedViolation.severity === 'CRITICAL' ? 'bg-red-100 text-red-800 border border-red-200' :
+                                  selectedViolation.severity === 'HIGH' ? 'bg-orange-100 text-orange-800 border border-orange-200' :
+                                  selectedViolation.severity === 'MEDIUM' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' :
+                                  'bg-gray-100 text-gray-800 border border-gray-200'
+                              }`}>
+                                  {selectedViolation.severity}
+                              </span>
+                          </div>
+                          <div><span className="font-semibold text-gray-500 block mb-1">Action</span> <span className="font-mono font-bold text-gray-700">{selectedViolation.action}</span></div>
+                          <div className="col-span-2"><span className="font-semibold text-gray-500 block mb-1">Reason</span> <div className="mt-1 text-gray-700 leading-relaxed">{formatReason(selectedViolation)}</div></div>
+                      </div>
+                      
+                      <div>
+                          <h4 className="text-sm font-semibold text-gray-900 mb-2">Full Violation Context</h4>
+                          <pre className="bg-gray-900 p-4 rounded-lg border border-gray-700 text-xs font-mono text-green-400 overflow-x-auto whitespace-pre-wrap break-words shadow-inner">
+                              {JSON.stringify(selectedViolation, null, 2)}
+                          </pre>
+                      </div>
+                  </div>
+                  <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3 shrink-0">
+                      <button 
+                        className="px-4 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 text-sm font-medium"
+                        onClick={() => setSelectedViolation(null)}
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                          disabled={actionLoading === selectedViolation.resource_id}
+                          onClick={() => handleExecuteAction(activeRun.id, selectedViolation)}
+                          className="flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm font-medium shadow-sm disabled:opacity-50"
+                      >
+                          {actionLoading === selectedViolation.resource_id ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : null}
+                          Execute Action
+                      </button>
+                  </div>
+              </div>
+          </div>
       )}
     </div>
   );

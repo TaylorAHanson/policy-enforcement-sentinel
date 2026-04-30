@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
-import { Save, Play, FileText, Plus, Trash2 } from 'lucide-react';
+import { Save, Play, Plus } from 'lucide-react';
 
 export default function PolicyEditor() {
   const [policies, setPolicies] = useState<string[]>([]);

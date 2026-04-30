@@ -1,12 +1,15 @@
-import React from 'react';
-import { BookOpen, Code, Database, ShieldAlert } from 'lucide-react';
+import { Code, Database, ShieldAlert } from 'lucide-react';
 
 export default function QuickReference() {
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Quick Reference</h1>
-        <p className="text-gray-500 mt-1">Documentation and guidelines for writing Rego policies for the Sentinel.</p>
+        <h1 className="text-2xl font-bold text-gray-900">Policy As Code: Quick Reference</h1>
+        <p className="text-gray-500 mt-2 max-w-3xl leading-relaxed">
+          <strong>Policy As Code.</strong> This is a magic phrase. Enterprise architects and security architects go bananas for it. 
+          The Sentinel uses <strong>OPA (Open Policy Agent)</strong>—which takes a policy in one hand, a set of facts in the other, and returns "yes" or "no" like a boolean evaluation engine. 
+          The language these policies are written in is <strong>Rego</strong>, a declarative language whose superpower is reusability (DRY not WET).
+        </p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -93,6 +96,19 @@ reason = "Cluster is missing required tags." { is_violation }`}
           </div>
         </div>
 
+        {/* Unvarnished Truth */}
+        <div className="bg-gray-50 p-6 rounded-lg border border-gray-200 md:col-span-2 mt-4">
+          <div className="flex items-center gap-2 mb-3 text-gray-800">
+            <ShieldAlert className="w-5 h-5 text-gray-500" />
+            <h2 className="text-lg font-semibold text-gray-900">The Unvarnished Truth</h2>
+          </div>
+          <ul className="list-disc pl-5 space-y-2 text-sm text-gray-700">
+            <li><strong>Not a replacement for Unity Catalog:</strong> If you can manage it in Unity Catalog, prefer that.</li>
+            <li><strong>We don't lock the platform down:</strong> There is a reason Databricks is flexible! We want users to build stuff.</li>
+            <li><strong>This is reactive, not proactive:</strong> Do not count on this for mission-critical security that must be blocked inline.</li>
+            <li><strong>The SP this runs as needs wide-ranging permissions:</strong> Consider the blast radius and Principle of Least Privilege (PLP).</li>
+          </ul>
+        </div>
       </div>
     </div>
   );

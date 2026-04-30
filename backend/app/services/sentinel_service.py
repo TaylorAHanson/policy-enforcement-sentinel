@@ -184,3 +184,47 @@ class SentinelService:
             "total_violations": len(violations),
             "violations": violations
         }
+
+    async def execute_action(self, action: str, resource_type: str, resource_id: str, reason: str = "Manual execution") -> Dict[str, Any]:
+        logger.info(f"Manually executing {action} on {resource_type} {resource_id}")
+        
+        try:
+            workspace_client = self.db_provider.client
+        except Exception as e:
+            logger.error(f"Failed to init Databricks client: {e}")
+            return {"error": str(e), "success": False}
+
+        handlers_map = {
+            "app": AppResourceHandler(workspace_client),
+            "cluster": ClusterResourceHandler(workspace_client),
+            "job": JobResourceHandler(workspace_client),
+            "sql_warehouse": SqlWarehouseResourceHandler(workspace_client),
+            "dashboard": DashboardResourceHandler(workspace_client),
+            "genie_space": GenieSpaceResourceHandler(workspace_client),
+            "service_principal": ServicePrincipalResourceHandler(workspace_client),
+            "notebook": NotebookResourceHandler(workspace_client),
+            "storage": VolumeResourceHandler(workspace_client),
+            "table": DatasetResourceHandler(workspace_client),
+            "data_product": DatasetResourceHandler(workspace_client),
+        }
+
+        handler = handlers_map.get(resource_type)
+        if not handler:
+            return {"error": f"No handler for {resource_type}", "success": False}
+        
+        try:
+            if action == "KILL" and hasattr(handler, "kill"):
+                await handler.kill(resource_id)
+            elif action == "WARN" and hasattr(handler, "warn"):
+                await handler.warn(resource_id, reason)
+            elif action == "CERTIFY" and hasattr(handler, "certify"):
+                await handler.certify(resource_id)
+            elif action == "UNCERTIFY" and hasattr(handler, "uncertify"):
+                await handler.uncertify(resource_id)
+            else:
+                return {"error": f"Action {action} not supported for {resource_type}", "success": False}
+            
+            return {"success": True, "message": f"Successfully executed {action} on {resource_id}"}
+        except Exception as e:
+            logger.error(f"Failed to execute {action} on {resource_id}: {e}")
+            return {"error": str(e), "success": False}
