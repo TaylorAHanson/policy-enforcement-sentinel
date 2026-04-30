@@ -1,0 +1,86 @@
+bundle:
+  name: policy-enforcement-sentinel
+  databricks_cli_version: ">=0.283.0"
+
+resources:
+  apps:
+    policy-enforcement-sentinel:
+      name: ${var.app_name}
+      description: "Policy Enforcement Sentinel Standalone App"
+      source_code_path: "${var.source_code_path}"
+      config:
+        command:
+          - python
+          - backend/run.py
+        env:
+          - name: ENVIRONMENT
+            value: "${var.environment}"
+          - name: PROJECT_NAME
+            value: "policy-enforcement-sentinel"
+          - name: API_V1_PREFIX
+            value: "/api/v1"
+          - name: LOG_LEVEL
+            value: "INFO"
+      
+      user_api_scopes:
+        - "sql"
+        - "sql.statement-execution"
+        - "sql.warehouses"
+        - "files.files"
+        
+      permissions:
+        - level: CAN_MANAGE
+          user_name: "${workspace.current_user.userName}"
+        - level: CAN_USE
+          group_name: "users"
+
+sync:
+  include:
+    - package.json
+    - vite.config.ts
+    - tsconfig.json
+    - tailwind.config.js
+    - postcss.config.js
+    - index.html
+    - src/**
+    - public/**
+    - backend/**
+  exclude:
+    - backend/__pycache__/**
+    - backend/**/*.pyc
+    - backend/venv/**
+    - backend/.env*
+    - backend/*.db
+    - .DS_Store
+    - backend/dist/**
+    - backend/build/**
+    - backend/*.log
+
+variables:
+  dev_user:
+    description: "Developer username for personal dev instances"
+    default: "taylor"
+  app_name:
+    description: "Application name"
+    default: "policy-enforcement-sentinel"
+  environment:
+    description: "Environment name"
+    default: "local"
+  source_code_path:
+    description: "Path to source code in workspace"
+    default: "."
+
+targets:
+  local:
+    mode: development
+    default: true
+    presets:
+      tags:
+        version: "VERSION_TAG"
+        deployed_via: "local"
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      app_name: "policy-enforcement-sentinel-local-${var.dev_user}"
+      environment: "local"
+      source_code_path: "."
