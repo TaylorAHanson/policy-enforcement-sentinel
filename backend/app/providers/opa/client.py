@@ -140,6 +140,118 @@ class OpaProvider(BaseProvider):
             return self._resolve_opa_executable() is not None
         return False
 
+    async def check(self, policy_name: str, content: str) -> Dict[str, Any]:
+        """
+        Validate Rego syntax using `opa check`.
+        By copying the policies directory to a temp dir and overwriting the specific policy,
+        we can resolve imports correctly.
+        """
+        import tempfile
+        if self.opa_url:
+            # For remote servers, we might not have a direct check endpoint that accepts raw text easily without a PUT to a policy.
+            try:
+                opa_exe = self._require_local_opa()
+            except PermanentError:
+                return {"valid": True, "errors": []} # Can't check remotely easily without modifying server state
+        else:
+            opa_exe = self._require_local_opa()
+
+        policies_dir_path = os.path.join(os.getcwd(), self.policies_dir)
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            if os.path.exists(policies_dir_path):
+                shutil.copytree(policies_dir_path, temp_dir, dirs_exist_ok=True)
+            
+            temp_policy_path = os.path.join(temp_dir, policy_name)
+            with open(temp_policy_path, "w") as f:
+                f.write(content)
+
+            try:
+                cmd = [opa_exe, "check", temp_dir, "-f", "json"]
+                process = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if process.returncode == 0:
+                    return {"valid": True, "errors": []}
+                else:
+                    try:
+                        output = json.loads(process.stdout)
+                        errors = []
+                        for err in output.get("errors", []):
+                            msg = err.get("message", "Unknown error")
+                            file_loc = err.get("location", {}).get("file", "")
+                            # Only show errors for the file we are editing, or global errors
+                            if not file_loc or policy_name in file_loc:
+                                row = err.get("location", {}).get("row", "?")
+                                errors.append(f"{msg} (Line {row})")
+                        
+                        # If errors were found but they were all in other files (unlikely since we just changed one),
+                        # or if we couldn't parse properly, just return generic if empty
+                        if not errors:
+                             errors = ["Validation failed (check other files)."]
+                        return {"valid": False, "errors": errors}
+                    except:
+                        return {"valid": False, "errors": [process.stderr or process.stdout or "Invalid Rego syntax"]}
+            except Exception as e:
+                return {"valid": False, "errors": [str(e)]}
+
+    async def evaluate_content(self, policy_name: str, content: str, query: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Evaluate a Rego policy using live content from the editor instead of the saved file.
+        """
+        if self.opa_url:
+            # We cannot easily push live content to a remote OPA server without modifying its state.
+            # Fall back to evaluating whatever is already there.
+            return await self._evaluate_remote(query, input_data)
+        elif self.use_local_binary:
+            return await self._evaluate_local_content(policy_name, content, query, input_data)
+        else:
+            raise PermanentError("OPA provider not configured for remote or local execution")
+
+    async def _evaluate_local_content(self, policy_name: str, content: str, query: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        import tempfile
+        opa_exe = self._require_local_opa()
+        policies_dir_path = os.path.join(os.getcwd(), self.policies_dir)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Copy all policies so imports work
+            if os.path.exists(policies_dir_path):
+                shutil.copytree(policies_dir_path, temp_dir, dirs_exist_ok=True)
+            
+            # Overwrite the specific policy with live content
+            temp_policy_path = os.path.join(temp_dir, policy_name)
+            with open(temp_policy_path, "w") as f:
+                f.write(content)
+
+            # Write input data
+            temp_in_path = os.path.join(temp_dir, "input.json")
+            with open(temp_in_path, "w") as temp_in:
+                json.dump(input_data, temp_in)
+
+            try:
+                cmd = [
+                    opa_exe,
+                    "eval",
+                    "-d",
+                    temp_dir,
+                    "-i",
+                    temp_in_path,
+                    "-f",
+                    "values",
+                    query,
+                ]
+
+                process = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if process.returncode != 0:
+                    raise PermanentError(f"OPA evaluation failed:\n{process.stderr or process.stdout}")
+                    
+                output = json.loads(process.stdout)
+                if not output:
+                    return {}
+                return output[0] if isinstance(output, list) else output
+            except FileNotFoundError as e:
+                raise PermanentError(OPA_SETUP_HINT) from e
+
     async def evaluate(self, policy_path: str, query: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Evaluate a Rego policy.

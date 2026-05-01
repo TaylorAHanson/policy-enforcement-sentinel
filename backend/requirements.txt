@@ -12,3 +12,4 @@ databricks-sdk==0.100.0
 tenacity==9.1.4
 PyYAML==6.0.3
 mcp==1.20.0
+croniter==6.2.2

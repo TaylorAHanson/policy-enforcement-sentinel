@@ -11,8 +11,13 @@ router = APIRouter()
 class PolicyContent(BaseModel):
     content: str
 
+class PolicyValidatePayload(BaseModel):
+    policy_name: str
+    content: str
+
 class EvalRequest(BaseModel):
     policy_name: str
+    content: str
     query: str
     input_data: Dict[str, Any]
 
@@ -27,6 +32,34 @@ async def list_policies():
     for f in files:
         policies.append(os.path.basename(f))
     return policies
+
+@router.post("/validate")
+async def validate_policy(payload: PolicyValidatePayload):
+    opa_provider = OpaProvider(settings.opa_provider_config())
+    try:
+        result = await opa_provider.check(payload.policy_name, payload.content)
+        return result
+    except Exception as e:
+        return {"valid": False, "errors": [str(e)]}
+
+@router.post("/evaluate")
+async def evaluate_policy(payload: EvalRequest):
+    """
+    Evaluate arbitrary input against a live policy content.
+    Useful for the playground.
+    """
+    opa_provider = OpaProvider(settings.opa_provider_config())
+    
+    try:
+        result = await opa_provider.evaluate_content(
+            policy_name=payload.policy_name,
+            content=payload.content,
+            query=payload.query,
+            input_data=payload.input_data
+        )
+        return {"success": True, "result": result}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 @router.get("/{policy_name}")
 async def get_policy(policy_name: str):
@@ -62,25 +95,3 @@ async def delete_policy(policy_name: str):
         os.remove(policy_path)
         return {"message": "Policy deleted"}
     raise HTTPException(status_code=404, detail="Policy not found")
-
-@router.post("/evaluate")
-async def evaluate_policy(payload: EvalRequest):
-    """
-    Evaluate arbitrary input against a policy.
-    Useful for the playground.
-    """
-    opa_provider = OpaProvider(settings.opa_provider_config())
-    policy_path = os.path.join(os.getcwd(), settings.POLICIES_DIR, payload.policy_name)
-    
-    # Use either the provided path or if evaluating ad-hoc, maybe write a temp file.
-    # We will assume they saved the policy first, so we just use the name.
-    
-    try:
-        result = await opa_provider.evaluate(
-            policy_path=policy_path,
-            query=payload.query,
-            input_data=payload.input_data
-        )
-        return {"success": True, "result": result}
-    except Exception as e:
-        return {"success": False, "error": str(e)}

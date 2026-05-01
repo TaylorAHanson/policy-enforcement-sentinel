@@ -21,6 +21,14 @@ resources:
             value: "/api/v1"
           - name: LOG_LEVEL
             value: "INFO"
+          - name: BRANDING_NAME
+            value: "Policy Enforcement Sentinel"
+          - name: BRANDING_LOGO_URL
+            value: "https://www.openpolicyagent.org/img/nav/logo.png"
+          - name: BRANDING_PRIMARY_COLOR
+            value: "#3253DC"
+          - name: BRANDING_SECONDARY_COLOR
+            value: "#000000"
       
       user_api_scopes:
         - "sql"
@@ -77,10 +85,64 @@ targets:
     presets:
       tags:
         version: "VERSION_TAG"
+        Repo_name: "${bundle.name}"
         deployed_via: "local"
+        Environment: "local"
+        Application: "Policy Enforcement Sentinel"
     workspace:
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
       app_name: "policy-enforcement-sentinel-local-${var.dev_user}"
       environment: "local"
+      source_code_path: "."
+
+  # Development environment
+  dev:
+    mode: production
+    presets:
+      tags:
+        version: "VERSION_TAG"
+        Repo_name: "${bundle.name}"
+        deployed_via: "CICD"
+        Environment: "dev"
+        Application: "Policy Enforcement Sentinel"
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      app_name: "policy-enforcement-sentinel-dev"
+      environment: "dev"
+      source_code_path: "."
+
+  # Staging environment
+  stage:
+    mode: production
+    presets:
+      tags:
+        version: "VERSION_TAG"
+        Repo_name: "${bundle.name}"
+        deployed_via: "CICD"
+        Environment: "stage"
+        Application: "Policy Enforcement Sentinel"
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      app_name: "policy-enforcement-sentinel-stage"
+      environment: "stage"
+      source_code_path: "."
+
+  # Production environment
+  prod:
+    mode: production
+    presets:
+      tags:
+        version: "VERSION_TAG"
+        Repo_name: "${bundle.name}"
+        deployed_via: "CICD"
+        Environment: "prod"
+        Application: "Policy Enforcement Sentinel"
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      app_name: "policy-enforcement-sentinel-prod"
+      environment: "prod"
       source_code_path: "."

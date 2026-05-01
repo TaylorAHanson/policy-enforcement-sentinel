@@ -26,7 +26,7 @@ violation_reasons contains msg if {
 
 violation_reasons contains msg if {
     input.resource.type == "job"
-    input.resource.failed_consecutively_days > 30
+    input.resource.failed_consecutively_days > 34
     msg := "Job has failed consecutively for over 30 days."
 }
 

@@ -1,9 +1,0 @@
-branding:
-  name: "Policy Enforcement Sentinel"
-  logo_url: "https://www.openpolicyagent.org/img/nav/logo.png"
-  primary_color: "#3253DC"
-  secondary_color: "#000000"
-  info_color: "#3253DC"
-  alert_color: "#D32F2F"
-  warning_color: "#FFC107"
-  success_color: "#388E3C"

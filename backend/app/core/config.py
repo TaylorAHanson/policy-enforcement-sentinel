@@ -19,6 +19,16 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "sqlite:///atlas_hub.db"
 
+    SENTINEL_CRON_SCHEDULE: Optional[str] = None
+    SENTINEL_CRON_WORKSPACE: str = "ws-enterprise-prod"
+    SENTINEL_CRON_ENV: str = "prod"
+    SENTINEL_CRON_MODE: str = "audit"
+
+    BRANDING_NAME: str = "Policy Enforcement Sentinel"
+    BRANDING_LOGO_URL: str = "https://www.openpolicyagent.org/img/nav/logo.png"
+    BRANDING_PRIMARY_COLOR: str = "#3253DC"
+    BRANDING_SECONDARY_COLOR: str = "#000000"
+
     def opa_provider_config(self) -> dict:
         return {
             "opa_url": self.OPA_URL,

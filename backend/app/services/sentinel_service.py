@@ -6,6 +6,8 @@ from datetime import datetime
 from app.core.config import settings
 from app.providers.databricks.client import DatabricksProvider
 from app.providers.opa.client import OpaProvider
+from app.db.session import SessionLocal
+from app.db.allowlist import AllowlistModel
 
 from app.providers.databricks.handlers import (
     AppResourceHandler,
@@ -17,7 +19,9 @@ from app.providers.databricks.handlers import (
     ServicePrincipalResourceHandler,
     NotebookResourceHandler,
     VolumeResourceHandler,
-    DatasetResourceHandler
+    DatasetResourceHandler,
+    ModelServingEndpointResourceHandler,
+    PipelineResourceHandler
 )
 import glob
 import os
@@ -56,7 +60,9 @@ class SentinelService:
             ServicePrincipalResourceHandler,
             NotebookResourceHandler,
             VolumeResourceHandler,
-            DatasetResourceHandler
+            DatasetResourceHandler,
+            ModelServingEndpointResourceHandler,
+            PipelineResourceHandler
         ]
 
         discovered_resources = []
@@ -78,6 +84,23 @@ class SentinelService:
 
         workspace_type = "enterprise" if "enterprise" in workspace_name else "domain"
         
+        # Fetch allowlist records
+        db = SessionLocal()
+        allowlist_objs = db.query(AllowlistModel).filter(
+            AllowlistModel.workspace == workspace_name,
+            AllowlistModel.status == "approved"
+        ).all()
+        allowlist_records = [
+            {
+                "id": r.id,
+                "resource_id": r.resource_id,
+                "resource_type": r.resource_type,
+                "justification": r.justification
+            }
+            for r in allowlist_objs
+        ]
+        db.close()
+        
         policy_files = glob.glob(os.path.join(settings.POLICIES_DIR, "*.rego"))
         violations = []
         
@@ -91,7 +114,7 @@ class SentinelService:
                     "workspace": {"name": workspace_name, "type": workspace_type, "environment": environment},
                     "resource": resource,
                     "request_time": datetime.utcnow().isoformat(),
-                    "allowlist_records": [] # Could be hydrated from DB
+                    "allowlist_records": allowlist_records
                 }
                 try:
                     result = await self.opa_provider.evaluate(
@@ -143,6 +166,8 @@ class SentinelService:
                 "storage": VolumeResourceHandler(workspace_client),
                 "table": DatasetResourceHandler(workspace_client),
                 "data_product": DatasetResourceHandler(workspace_client),
+                "model_serving_endpoint": ModelServingEndpointResourceHandler(workspace_client),
+                "pipeline": PipelineResourceHandler(workspace_client),
             }
 
             async def _enforce(violation):
@@ -206,6 +231,8 @@ class SentinelService:
             "storage": VolumeResourceHandler(workspace_client),
             "table": DatasetResourceHandler(workspace_client),
             "data_product": DatasetResourceHandler(workspace_client),
+            "model_serving_endpoint": ModelServingEndpointResourceHandler(workspace_client),
+            "pipeline": PipelineResourceHandler(workspace_client),
         }
 
         handler = handlers_map.get(resource_type)

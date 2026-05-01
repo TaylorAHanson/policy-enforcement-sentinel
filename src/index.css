@@ -3,7 +3,23 @@
 @tailwind utilities;
 
 :root {
-  --brand-primary: #3b82f6;
+  --brand-primary: #4299e0;
+  color-scheme: dark;
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center h-8 px-3 rounded-[4px] text-[13px] font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none cursor-pointer;
+    background-color: rgb(66, 153, 224) !important;
+    color: rgb(17, 23, 28) !important;
+    border-color: transparent !important;
+    text-shadow: none !important;
+    box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.45) !important;
+    line-height: 20px !important;
+  }
+  .btn-primary:hover {
+    background-color: rgb(53, 135, 201) !important;
+  }
 }
 
 body {
@@ -11,4 +27,22 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: #0b0f15;
+  color: #e2e8f0;
+}
+
+/* Custom scrollbar for a cleaner dark UI */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #334155;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #475569;
 }

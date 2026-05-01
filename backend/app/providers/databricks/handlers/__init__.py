@@ -9,6 +9,8 @@ from app.providers.databricks.handlers.service_principal_handler import ServiceP
 from app.providers.databricks.handlers.notebook_handler import NotebookResourceHandler
 from app.providers.databricks.handlers.volume_handler import VolumeResourceHandler
 from app.providers.databricks.handlers.dataset_handler import DatasetResourceHandler
+from app.providers.databricks.handlers.model_serving_handler import ModelServingEndpointResourceHandler
+from app.providers.databricks.handlers.pipeline_handler import PipelineResourceHandler
 
 __all__ = [
     "BaseResourceHandler",
@@ -21,5 +23,7 @@ __all__ = [
     "ServicePrincipalResourceHandler",
     "NotebookResourceHandler",
     "VolumeResourceHandler",
-    "DatasetResourceHandler"
+    "DatasetResourceHandler",
+    "ModelServingEndpointResourceHandler",
+    "PipelineResourceHandler"
 ]
