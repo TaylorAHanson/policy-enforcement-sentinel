@@ -22,7 +22,13 @@ class Settings(BaseSettings):
     GITHUB_TARGET_BRANCH: str = "main"
     GITHUB_POLICIES_DIR: str = "backend/policies"
 
-    DATABASE_URL: str = "sqlite:///atlas_hub.db"
+    DATABASE_URL: Optional[str] = None
+    DATABASE_HOST: Optional[str] = None
+    DATABASE_USER: Optional[str] = None
+    DATABASE_NAME: Optional[str] = None
+    DATABASE_PORT: str = "5432"
+    DATABASE_PASSWORD: Optional[str] = None
+    DATABASE_INSTANCE_NAME: Optional[str] = None
 
     SENTINEL_WORKSPACES: Optional[str] = None
 

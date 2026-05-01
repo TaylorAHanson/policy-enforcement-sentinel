@@ -252,3 +252,4 @@ backend/sentinel.db
 
 # Frontend Build Output
 backend/static/
+package-lock.json

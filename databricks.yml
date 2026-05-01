@@ -3,11 +3,28 @@ bundle:
   databricks_cli_version: ">=0.283.0"
 
 resources:
+  database_instances:
+    pe_sentinel_db:
+      name: "pe-sentinel-${var.environment}-db"
+      enable_pg_native_login: true
+      capacity: "CU_1"
+      lifecycle:
+        prevent_destroy: true
+      permissions:
+        - level: CAN_USE
+          group_name: "users"
+
   apps:
     policy-enforcement-sentinel:
       name: ${var.app_name}
       description: "Policy Enforcement Sentinel Standalone App"
       source_code_path: "${var.source_code_path}"
+      resources:
+        - name: postgres
+          database:
+            database_name: databricks_postgres
+            instance_name: ${resources.database_instances.pe_sentinel_db.name}
+            permission: CAN_CONNECT_AND_CREATE
       config:
         command:
           - python
@@ -53,7 +70,9 @@ sync:
     - src/**
     - public/**
     - backend/**
+    - README.md
   exclude:
+    - package-lock.json
     - backend/__pycache__/**
     - backend/**/*.pyc
     - backend/venv/**
