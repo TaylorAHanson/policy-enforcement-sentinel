@@ -248,3 +248,7 @@ venv.bak/
 # Local DBs
 atlas_hub.db
 backend/atlas_hub.db
+backend/sentinel.db
+
+# Frontend Build Output
+backend/static/

@@ -32,26 +32,44 @@ async def start_scheduler():
                 logger.info(f"Executing scheduled sentinel run (ID: {run_id})...")
                 try:
                     # Execute the actual sentinel run
-                    svc = SentinelService()
-                    results = await svc.run_discovery_and_evaluation(
-                        workspace_name=settings.SENTINEL_CRON_WORKSPACE,
-                        environment=settings.SENTINEL_CRON_ENV,
-                        mode=settings.SENTINEL_CRON_MODE
-                    )
+                    all_violations = []
+                    total_scanned = 0
+                    workspaces = settings.get_workspaces()
+                    
+                    for ws_conf in workspaces:
+                        svc = SentinelService(workspace_config=ws_conf)
+                        ws_name = ws_conf.get("name", "unknown")
+                        ws_env = ws_conf.get("environment", "prod")
+                        
+                        results = await svc.run_discovery_and_evaluation(
+                            workspace_name=ws_name,
+                            environment=ws_env,
+                            mode=settings.SENTINEL_CRON_MODE
+                        )
+                        total_scanned += results.get("total_scanned", 0)
+                        all_violations.extend(results.get("violations", []))
+                    
+                    final_results = {
+                        "total_scanned": total_scanned,
+                        "total_violations": len(all_violations),
+                        "violations": all_violations
+                    }
                     
                     # Import and store the run in the in-memory history 
                     # (or database, if you upgrade to SQLite run history later)
                     from app.api.v1.endpoints.sentinel import run_history
                     
+                    names = [w.get("name", "unknown") for w in workspaces]
+                    
                     run_record = {
                         "id": run_id,
-                        "workspace": settings.SENTINEL_CRON_WORKSPACE,
-                        "environment": settings.SENTINEL_CRON_ENV,
+                        "workspace": ", ".join(names),
+                        "environment": "multiple" if len(names) > 1 else workspaces[0].get("environment", "prod"),
                         "mode": settings.SENTINEL_CRON_MODE,
                         "status": "completed",
                         "started_at": now.isoformat(),
                         "completed_at": datetime.now(timezone.utc).isoformat(),
-                        "results": results
+                        "results": final_results
                     }
                     run_history.insert(0, run_record)
                     logger.info(f"Scheduled sentinel run (ID: {run_id}) completed successfully.")
@@ -60,10 +78,12 @@ async def start_scheduler():
                     logger.error(f"Scheduled sentinel run (ID: {run_id}) failed: {e}", exc_info=True)
                     
                     from app.api.v1.endpoints.sentinel import run_history
+                    workspaces = settings.get_workspaces()
+                    names = [w.get("name", "unknown") for w in workspaces]
                     run_record = {
                         "id": run_id,
-                        "workspace": settings.SENTINEL_CRON_WORKSPACE,
-                        "environment": settings.SENTINEL_CRON_ENV,
+                        "workspace": ", ".join(names),
+                        "environment": "multiple" if len(names) > 1 else workspaces[0].get("environment", "prod"),
                         "mode": settings.SENTINEL_CRON_MODE,
                         "status": "failed",
                         "started_at": now.isoformat(),

@@ -41,13 +41,14 @@ def test_enforcement_action(MockSentinelService):
 @patch('app.api.v1.endpoints.policies.OpaProvider')
 def test_evaluate_policy(MockOpa):
     mock_opa = MagicMock()
-    async def mock_evaluate(*args, **kwargs):
+    async def mock_evaluate_content(*args, **kwargs):
         return {"is_violation": True}
-    mock_opa.evaluate = mock_evaluate
+    mock_opa.evaluate_content = mock_evaluate_content
     MockOpa.return_value = mock_opa
     
     res = client.post("/api/v1/policies/evaluate", json={
         "policy_name": "test.rego",
+        "content": "package test\n\ndefault is_violation = true",
         "query": "data.test",
         "input_data": {"resource": {"id": "1"}}
     })

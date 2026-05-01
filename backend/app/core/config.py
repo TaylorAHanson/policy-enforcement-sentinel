@@ -17,7 +17,14 @@ class Settings(BaseSettings):
     POLICIES_DIR: str = "policies"
     OPA_BINARY: Optional[str] = None
 
+    GITHUB_TOKEN: Optional[str] = None
+    GITHUB_REPO: Optional[str] = None
+    GITHUB_TARGET_BRANCH: str = "main"
+    GITHUB_POLICIES_DIR: str = "backend/policies"
+
     DATABASE_URL: str = "sqlite:///atlas_hub.db"
+
+    SENTINEL_WORKSPACES: Optional[str] = None
 
     SENTINEL_CRON_SCHEDULE: Optional[str] = None
     SENTINEL_CRON_WORKSPACE: str = "ws-enterprise-prod"
@@ -36,6 +43,25 @@ class Settings(BaseSettings):
             "policies_dir": self.POLICIES_DIR,
             "opa_binary": self.OPA_BINARY,
         }
+
+    def get_workspaces(self) -> List[Dict[str, str]]:
+        import json
+        if self.SENTINEL_WORKSPACES:
+            try:
+                return json.loads(self.SENTINEL_WORKSPACES)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to parse SENTINEL_WORKSPACES JSON: {e}")
+        
+        # Fallback to single workspace using legacy variables
+        return [{
+            "name": self.SENTINEL_CRON_WORKSPACE,
+            "environment": self.SENTINEL_CRON_ENV,
+            "host": self.DATABRICKS_HOST or self.DATABRICKS_WORKSPACE_URL or "",
+            "token": self.DATABRICKS_TOKEN,
+            "client_id": self.DATABRICKS_CLIENT_ID,
+            "client_secret": self.DATABRICKS_CLIENT_SECRET
+        }]
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

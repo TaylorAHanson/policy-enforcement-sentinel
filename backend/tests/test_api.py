@@ -72,7 +72,7 @@ def test_trigger_sentinel_run():
     assert response.status_code == 200
     data = response.json()
     assert "run_id" in data
-    assert data["message"] == "Run started in audit mode"
+    assert "Run started in audit mode across" in data["message"]
     
     # Wait briefly or test fetching runs
     run_id = data["run_id"]

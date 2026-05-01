@@ -76,7 +76,8 @@ export default function SentinelDashboard() {
                   resource_type: v.resource_type,
                   action: v.action,
                   policy_name: v.policy,
-                  reason: v.reason
+                  reason: v.reason,
+                  workspace: v.workspace
               })
           });
           

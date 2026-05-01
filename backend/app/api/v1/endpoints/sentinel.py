@@ -17,6 +17,7 @@ class EnforcementActionRequest(BaseModel):
     action: str
     policy_name: str
     reason: str = "Manual execution via UI"
+    workspace: str = None
 
 @router.post("/runs/{run_id}/enforcement-action")
 async def execute_enforcement_action(run_id: str, payload: EnforcementActionRequest):
@@ -30,7 +31,15 @@ async def execute_enforcement_action(run_id: str, payload: EnforcementActionRequ
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
         
-    svc = SentinelService()
+    from app.core.config import settings
+    ws_config = None
+    if payload.workspace:
+        for w in settings.get_workspaces():
+            if w.get("name") == payload.workspace:
+                ws_config = w
+                break
+                
+    svc = SentinelService(workspace_config=ws_config)
     result = await svc.execute_action(
         action=payload.action,
         resource_type=payload.resource_type,
@@ -44,12 +53,16 @@ async def execute_enforcement_action(run_id: str, payload: EnforcementActionRequ
     return result
 
 @router.post("/run")
-async def trigger_run(background_tasks: BackgroundTasks, workspace: str = "ws-enterprise-prod", env: str = "prod", mode: str = "audit"):
+async def trigger_run(background_tasks: BackgroundTasks, mode: str = "audit"):
+    from app.core.config import settings
+    workspaces = settings.get_workspaces()
+    names = [w.get("name", "unknown") for w in workspaces]
+    
     run_id = str(uuid.uuid4())
     run_record = {
         "id": run_id,
-        "workspace": workspace,
-        "environment": env,
+        "workspace": ", ".join(names),
+        "environment": "multiple" if len(names) > 1 else workspaces[0].get("environment", "prod"),
         "mode": mode,
         "status": "running",
         "started_at": datetime.datetime.utcnow().isoformat(),
@@ -64,10 +77,24 @@ async def trigger_run(background_tasks: BackgroundTasks, workspace: str = "ws-en
         asyncio.set_event_loop(loop)
         
         try:
-            svc = SentinelService()
-            results = loop.run_until_complete(svc.run_discovery_and_evaluation(workspace, env, mode))
+            all_violations = []
+            total_scanned = 0
+            
+            for ws_conf in workspaces:
+                svc = SentinelService(workspace_config=ws_conf)
+                ws_name = ws_conf.get("name", "unknown")
+                ws_env = ws_conf.get("environment", "prod")
+                
+                results = loop.run_until_complete(svc.run_discovery_and_evaluation(ws_name, ws_env, mode))
+                total_scanned += results.get("total_scanned", 0)
+                all_violations.extend(results.get("violations", []))
+                
             run_record["status"] = "completed"
-            run_record["results"] = results
+            run_record["results"] = {
+                "total_scanned": total_scanned,
+                "total_violations": len(all_violations),
+                "violations": all_violations
+            }
         except Exception as e:
             run_record["status"] = "failed"
             run_record["error"] = str(e)
@@ -76,7 +103,7 @@ async def trigger_run(background_tasks: BackgroundTasks, workspace: str = "ws-en
             loop.close()
 
     background_tasks.add_task(_do_run)
-    return {"message": f"Run started in {mode} mode", "run_id": run_id}
+    return {"message": f"Run started in {mode} mode across {len(workspaces)} workspaces", "run_id": run_id}
 
 @router.get("/runs")
 async def get_runs():

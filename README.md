@@ -42,6 +42,43 @@ Policies are evaluated using **Open Policy Agent (OPA)** and are written in **Re
 
 You can develop, test, and tweak these policies directly in the app's **Policy Editor** tab, which simulates the evaluation live.
 
+### GitOps & GitHub Integration (Recommended)
+
+To prevent split-brain scenarios and maintain a strict audit trail, the Sentinel supports a fully integrated GitOps workflow. By configuring a GitHub Personal Access Token (PAT), the Policy Editor transforms into a live authoring environment connected directly to your repository:
+
+1. **Live Read:** The Policy Editor fetches the absolute latest `.rego` policies directly from your configured GitHub branch, ensuring you never edit stale code.
+2. **Live Evaluation:** You can author and test policies instantly in the Playground against simulated JSON inputs without saving.
+3. **Propose Changes:** Instead of saving locally, clicking "Create Pull Request" in the UI will automatically create a new branch, commit your changes, and open a Pull Request in GitHub for your team to review.
+4. **Enforcement:** The Databricks App itself continues to enforce the physical policies deployed in its bundle. Once your PR is merged, your standard CI/CD pipeline deploys the updated app to Databricks, and the new policies take effect.
+
+#### What happens if I don't configure GitHub?
+The GitHub integration is purely optional for local development. If you omit the variables, the app gracefully falls back to reading and writing `.rego` files directly to the local disk (`backend/policies`).
+
+However, **in a deployed Databricks App, you should always configure the GitHub integration.** Databricks Apps run in a containerized environment where the local filesystem is ephemeral. If you omit the GitHub variables in production, any policy changes saved from the UI will be lost the next time the app restarts.
+
+#### What do the actual Sentinel runs use?
+The actual enforcement engine (the background cron scheduler and the "Run Now" button) **always reads strictly from the physical local disk inside the container** (`backend/policies/*`). It **never** pulls live policies from GitHub during a run.
+
+This creates a safe, conflict-free architecture:
+- The **UI** connects to GitHub so users can author and test the absolute bleeding edge.
+- The **Enforcement Engine** reads the local disk to run what has *actually been deployed* via your CI/CD pipeline.
+
+To enable this, configure the following in your `.env` (for local dev) or `databricks.yml` (for production):
+
+```yaml
+env:
+  - name: GITHUB_TOKEN
+    value: "your-github-pat"
+  - name: GITHUB_REPO
+    value: "databricks-field-eng/policy-enforcement-sentinel"
+  - name: GITHUB_TARGET_BRANCH
+    value: "main"
+  - name: GITHUB_POLICIES_DIR
+    value: "backend/policies"
+```
+
+If GitHub integration is not configured, the Policy Editor will gracefully fall back to reading and writing `.rego` files directly to the local disk.
+
 ### Supported Resources
 
 The Sentinel currently discovers and evaluates the following Databricks resources:
@@ -133,22 +170,35 @@ This exposes tools like `trigger_sentinel_run` natively without needing a separa
 
 ## Deployment to Databricks
 
-This repository is configured as a **Databricks Asset Bundle (DAB)**. By default, the bundle specifies how the app is deployed to your workspace. 
+This repository is configured as a **Databricks Asset Bundle (DAB)**. The bundle handles automatically packaging the app and deploying it to your workspace.
 
-Ensure your Databricks CLI is authenticated:
+### 1. Authenticate
+Ensure your Databricks CLI is authenticated to your target workspace:
 ```bash
-databricks auth login
+databricks auth profiles
+databricks auth login -p myenv
 ```
 
-To deploy to your personal development workspace (e.g., `local` target):
+### 2. Deploy & Run
+To deploy the App and run it immediately (e.g. against your `dev` target using a specific CLI profile `myenv`):
 ```bash
-databricks bundle deploy
+databricks bundle deploy -t dev -p myenv && databricks bundle run policy-enforcement-sentinel -t dev -p myenv
 ```
 
-To deploy to production:
-```bash
-databricks bundle deploy -t prod
+### Cross-Workspace Scanning
+
+The Sentinel can scan and enforce policies across multiple workspaces from a single Databricks App deployment. By default, it runs against the workspace it is deployed in (using the standard `DATABRICKS_HOST` and `DATABRICKS_TOKEN` variables). 
+
+To configure multiple workspaces, set the `SENTINEL_WORKSPACES` environment variable as a JSON string containing an array of workspace configurations. When the background scheduler fires or a manual run is triggered, the Sentinel will iterate through every workspace in the list, compile all the violations, and display them in a single, unified view on the dashboard.
+
+**Example `databricks.yml` configuration:**
+```yaml
+env:
+  - name: SENTINEL_WORKSPACES
+    value: '[{"name": "ws-enterprise-prod", "environment": "prod", "host": "https://prod.cloud.databricks.com", "token": "dapi123..."}, {"name": "ws-enterprise-dev", "environment": "dev", "host": "https://dev.cloud.databricks.com", "token": "dapi456..."}]'
 ```
+
+*Note: If you use a Service Principal (OAuth M2M) with Account-level privileges, you can omit the `token` in the JSON and simply provide `client_id` and `client_secret` at the global level. The Sentinel will automatically authenticate against each `host` using those central credentials.*
 
 ### Automated Scheduling
 

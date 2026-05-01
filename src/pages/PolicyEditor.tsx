@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Editor, { DiffEditor } from '@monaco-editor/react';
-import { Save, Play, Plus, Search, ChevronDown, Check, X, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Save, Play, Plus, Search, ChevronDown, Check, X, AlertTriangle, RefreshCw, GitPullRequest, ExternalLink } from 'lucide-react';
 
 export default function PolicyEditor() {
   const [policies, setPolicies] = useState<string[]>([]);
@@ -9,6 +9,9 @@ export default function PolicyEditor() {
   const [originalContent, setOriginalContent] = useState<string>('');
   const [showDiffModal, setShowDiffModal] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [githubEnabled, setGithubEnabled] = useState(false);
+  const [targetBranch, setTargetBranch] = useState('main');
+  const [prUrl, setPrUrl] = useState<string | null>(null);
   
   const [inputJson, setInputJson] = useState<string>('{\n  "workspace": {\n    "name": "ws-enterprise-prod",\n    "type": "enterprise",\n    "environment": "prod"\n  },\n  "resource": {\n    "id": "example-cluster",\n    "type": "cluster",\n    "attributes": {}\n  }\n}');
   const [outputJson, setOutputJson] = useState<string>('{}');
@@ -21,8 +24,20 @@ export default function PolicyEditor() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    fetchConfig();
     fetchPolicies();
   }, []);
+
+  const fetchConfig = async () => {
+    try {
+      const res = await fetch('/api/v1/policies/config');
+      const data = await res.json();
+      setGithubEnabled(data.github_enabled);
+      setTargetBranch(data.target_branch || 'main');
+    } catch (e) {
+      console.error("Failed to fetch config", e);
+    }
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -117,6 +132,7 @@ export default function PolicyEditor() {
       setPolicyContent(data.content);
       setOriginalContent(data.content);
       setValidationErrors([]);
+      setPrUrl(null);
       setInputJson(getDefaultInputForPolicy(name));
     } catch (e) {
       console.error(e);
@@ -127,6 +143,7 @@ export default function PolicyEditor() {
     if (!selectedPolicy) return;
     setSaving(true);
     setValidationErrors([]);
+    setPrUrl(null);
     try {
       const res = await fetch('/api/v1/policies/validate', {
         method: 'POST',
@@ -167,16 +184,31 @@ export default function PolicyEditor() {
     if (!selectedPolicy) return;
     setSaving(true);
     try {
-      await fetch(`/api/v1/policies/${selectedPolicy}`, {
+      const endpoint = githubEnabled ? `/api/v1/policies/${selectedPolicy}/pr` : `/api/v1/policies/${selectedPolicy}`;
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: policyContent })
       });
+      
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Failed to save or create PR");
+      }
+      
       setOriginalContent(policyContent);
-      setShowDiffModal(false);
+      
+      if (githubEnabled && data.pr_url) {
+        setPrUrl(data.pr_url);
+        // We do NOT close the modal automatically here so they can see the success link.
+      } else {
+        setShowDiffModal(false);
+      }
+      
       await fetchPolicies();
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      alert(e.message || "An error occurred while saving.");
     } finally {
       setSaving(false);
     }
@@ -286,7 +318,9 @@ export default function PolicyEditor() {
               disabled={saving || !selectedPolicy}
               className="btn-primary gap-1.5"
             >
-              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
+              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : 
+               (githubEnabled ? <GitPullRequest className="w-4 h-4" /> : <Save className="w-4 h-4" />)} 
+              {githubEnabled ? 'Propose Change' : 'Save'}
             </button>
           </div>
           <div className="flex-1 bg-[#1e1e1e]">
@@ -363,30 +397,53 @@ export default function PolicyEditor() {
                 </button>
             </div>
             <div className="flex-1 bg-[#1e1e1e]">
-              <DiffEditor
-                height="100%"
-                language="ruby"
-                original={originalContent}
-                modified={policyContent}
-                theme="vs-dark"
-                options={{ minimap: { enabled: false }, fontSize: 14, renderSideBySide: true, readOnly: true }}
-              />
+              {prUrl ? (
+                <div className="h-full flex flex-col items-center justify-center bg-[#0b0f15] text-slate-300 p-8">
+                  <div className="w-16 h-16 bg-[#8acaff14] rounded-full flex items-center justify-center mb-6">
+                    <Check className="w-8 h-8 text-[#8acaff]" />
+                  </div>
+                  <h4 className="text-xl font-medium text-slate-100 mb-2">Pull Request Created!</h4>
+                  <p className="text-slate-400 mb-6 max-w-md text-center">
+                    Your policy changes have been successfully proposed. Please review and merge the pull request to apply them to <code>{targetBranch}</code>.
+                  </p>
+                  <a 
+                    href={prUrl} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="flex items-center gap-2 px-4 py-2 bg-[#1b232d] text-[#8acaff] border border-[#8acaff]/30 rounded hover:bg-[#8acaff14] font-medium transition-colors"
+                  >
+                    View Pull Request <ExternalLink className="w-4 h-4" />
+                  </a>
+                </div>
+              ) : (
+                <DiffEditor
+                  height="100%"
+                  language="ruby"
+                  original={originalContent}
+                  modified={policyContent}
+                  theme="vs-dark"
+                  options={{ minimap: { enabled: false }, fontSize: 14, renderSideBySide: true, readOnly: true }}
+                />
+              )}
             </div>
             <div className="p-4 border-t border-slate-800 bg-[#161b22] flex justify-end gap-3 shrink-0">
                 <button 
                   className="px-4 py-2 bg-[#1b232d] text-slate-300 border border-slate-700 rounded hover:bg-[#252f3d] text-sm font-medium transition-colors"
                   onClick={() => setShowDiffModal(false)}
                 >
-                  Cancel
+                  {prUrl ? 'Close' : 'Cancel'}
                 </button>
-                <button 
-                    disabled={saving}
-                    onClick={executeSave}
-                    className="btn-primary gap-2"
-                >
-                    {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                    Confirm & Save
-                </button>
+                {!prUrl && (
+                  <button 
+                      disabled={saving}
+                      onClick={executeSave}
+                      className="btn-primary gap-2"
+                  >
+                      {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : 
+                       (githubEnabled ? <GitPullRequest className="w-4 h-4" /> : <Check className="w-4 h-4" />)}
+                      {githubEnabled ? 'Create Pull Request' : 'Confirm & Save'}
+                  </button>
+                )}
             </div>
           </div>
         </div>

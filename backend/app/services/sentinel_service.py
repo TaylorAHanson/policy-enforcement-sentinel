@@ -29,13 +29,20 @@ import os
 logger = logging.getLogger(__name__)
 
 class SentinelService:
-    def __init__(self):
+    def __init__(self, workspace_config: Dict[str, str] = None):
         self.opa_provider = OpaProvider(settings.opa_provider_config())
+        
+        # Use workspace_config if provided, else fallback to global
+        host = workspace_config.get("host") if workspace_config else (settings.DATABRICKS_HOST or settings.DATABRICKS_WORKSPACE_URL or "")
+        token = workspace_config.get("token") if workspace_config else settings.DATABRICKS_TOKEN
+        client_id = workspace_config.get("client_id") if workspace_config else settings.DATABRICKS_CLIENT_ID
+        client_secret = workspace_config.get("client_secret") if workspace_config else settings.DATABRICKS_CLIENT_SECRET
+        
         self.db_provider = DatabricksProvider(
-            host=settings.DATABRICKS_HOST or settings.DATABRICKS_WORKSPACE_URL or "",
-            client_id=settings.DATABRICKS_CLIENT_ID,
-            client_secret=settings.DATABRICKS_CLIENT_SECRET,
-            token=settings.DATABRICKS_TOKEN
+            host=host,
+            client_id=client_id,
+            client_secret=client_secret,
+            token=token
         )
 
     async def run_discovery_and_evaluation(self, workspace_name: str, environment: str, mode: str = "audit") -> Dict[str, Any]:
@@ -135,7 +142,8 @@ class SentinelService:
                             "action": action,
                             "reason": result.get("reason", "Unknown violation"),
                             "severity": result.get("severity", "HIGH"),
-                            "resource_details": resource
+                            "resource_details": resource,
+                            "workspace": workspace_name
                         }
                 except Exception as e:
                     logger.error(f"Error evaluating {policy_name} on {resource.get('id')}: {e}")
