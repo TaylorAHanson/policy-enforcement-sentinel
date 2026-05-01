@@ -46,6 +46,7 @@ async def get_config():
         "target_branch": settings.GITHUB_TARGET_BRANCH
     }
 
+@router.get("")
 @router.get("/")
 async def list_policies():
     if settings.GITHUB_TOKEN and settings.GITHUB_REPO:

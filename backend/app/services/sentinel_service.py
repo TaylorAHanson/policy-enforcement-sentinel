@@ -103,13 +103,16 @@ class SentinelService:
                 "id": r.id,
                 "resource_id": r.resource_id,
                 "resource_type": r.resource_type,
+                "status": r.status,
                 "justification": r.justification
             }
             for r in allowlist_objs
         ]
         db.close()
         
-        policy_files = glob.glob(os.path.join(settings.POLICIES_DIR, "*.rego"))
+        policy_dir = settings.get_policies_dir
+        policy_files = glob.glob(os.path.join(policy_dir, "*.rego"))
+        logger.info(f"Looking for policies in {policy_dir}. Found {len(policy_files)} policy files: {policy_files}")
         violations = []
         
         semaphore = asyncio.Semaphore(50)

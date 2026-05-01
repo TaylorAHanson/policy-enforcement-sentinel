@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     OPA_URL: Optional[str] = None
     USE_LOCAL_BINARY: bool = True
-    POLICIES_DIR: str = "policies"
+    POLICIES_DIR: str = "backend/policies"
     OPA_BINARY: Optional[str] = None
 
     GITHUB_TOKEN: Optional[str] = None
@@ -42,11 +42,24 @@ class Settings(BaseSettings):
     BRANDING_PRIMARY_COLOR: str = "#3253DC"
     BRANDING_SECONDARY_COLOR: str = "#000000"
 
+    @property
+    def get_policies_dir(self) -> str:
+        import os
+        from pathlib import Path
+        # Current file is backend/app/core/config.py
+        # backend is .parent.parent.parent
+        base_dir = Path(__file__).parent.parent.parent
+        policies_path = base_dir / "policies"
+        if policies_path.exists():
+            return str(policies_path)
+        # Fallback to the configured relative path if absolute logic fails
+        return os.path.abspath(self.POLICIES_DIR)
+
     def opa_provider_config(self) -> dict:
         return {
             "opa_url": self.OPA_URL,
             "use_local_binary": self.USE_LOCAL_BINARY,
-            "policies_dir": self.POLICIES_DIR,
+            "policies_dir": self.get_policies_dir,
             "opa_binary": self.OPA_BINARY,
         }
 

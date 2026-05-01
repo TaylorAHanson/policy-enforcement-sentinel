@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from croniter import croniter
 from app.core.config import settings
 from app.services.sentinel_service import SentinelService
+from app.db.session import get_lakebase_session
+from app.db.sentinel_run import SentinelRunModel
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -27,14 +29,35 @@ async def start_scheduler():
         
         while True:
             now = datetime.now(timezone.utc)
+            
+            # Heartbeat log to prove the loop is running and checking
+            # (logs every 30s)
+            logger.info(f"⏳ [SENTINEL WORKER] Heartbeat: Current time: {now.strftime('%H:%M:%S')} UTC | Next scheduled run: {next_run.strftime('%H:%M:%S')} UTC")
+            
             if now >= next_run:
                 run_id = str(uuid.uuid4())
                 logger.info(f"Executing scheduled sentinel run (ID: {run_id})...")
+                
+                db = get_lakebase_session()
                 try:
+                    workspaces = settings.get_workspaces()
+                    names = [w.get("name", "unknown") for w in workspaces]
+                    
+                    # Create DB record for the run starting
+                    run_record = SentinelRunModel(
+                        id=run_id,
+                        workspace=", ".join(names),
+                        environment="multiple" if len(names) > 1 else workspaces[0].get("environment", "prod"),
+                        mode=settings.SENTINEL_CRON_MODE,
+                        status="running",
+                        started_at=now,
+                    )
+                    db.add(run_record)
+                    db.commit()
+                    
                     # Execute the actual sentinel run
                     all_violations = []
                     total_scanned = 0
-                    workspaces = settings.get_workspaces()
                     
                     for ws_conf in workspaces:
                         svc = SentinelService(workspace_config=ws_conf)
@@ -55,47 +78,29 @@ async def start_scheduler():
                         "violations": all_violations
                     }
                     
-                    # Import and store the run in the in-memory history 
-                    # (or database, if you upgrade to SQLite run history later)
-                    from app.api.v1.endpoints.sentinel import run_history
-                    
-                    names = [w.get("name", "unknown") for w in workspaces]
-                    
-                    run_record = {
-                        "id": run_id,
-                        "workspace": ", ".join(names),
-                        "environment": "multiple" if len(names) > 1 else workspaces[0].get("environment", "prod"),
-                        "mode": settings.SENTINEL_CRON_MODE,
-                        "status": "completed",
-                        "started_at": now.isoformat(),
-                        "completed_at": datetime.now(timezone.utc).isoformat(),
-                        "results": final_results
-                    }
-                    run_history.insert(0, run_record)
+                    # Update DB record with success
+                    run_record.status = "completed"
+                    run_record.completed_at = datetime.now(timezone.utc)
+                    run_record.results = final_results
+                    db.commit()
                     logger.info(f"Scheduled sentinel run (ID: {run_id}) completed successfully.")
                     
                 except Exception as e:
                     logger.error(f"Scheduled sentinel run (ID: {run_id}) failed: {e}", exc_info=True)
+                    db.rollback()
                     
-                    from app.api.v1.endpoints.sentinel import run_history
-                    workspaces = settings.get_workspaces()
-                    names = [w.get("name", "unknown") for w in workspaces]
-                    run_record = {
-                        "id": run_id,
-                        "workspace": ", ".join(names),
-                        "environment": "multiple" if len(names) > 1 else workspaces[0].get("environment", "prod"),
-                        "mode": settings.SENTINEL_CRON_MODE,
-                        "status": "failed",
-                        "started_at": now.isoformat(),
-                        "completed_at": datetime.now(timezone.utc).isoformat(),
-                        "error": str(e),
-                        "results": None
-                    }
-                    run_history.insert(0, run_record)
-                    
+                    # Update DB record with failure
+                    run = db.query(SentinelRunModel).filter(SentinelRunModel.id == run_id).first()
+                    if run:
+                        run.status = "failed"
+                        run.error = str(e)
+                        run.completed_at = datetime.now(timezone.utc)
+                        db.commit()
+                        
                 finally:
+                    db.close()
                     next_run = cron.get_next(datetime)
-                    logger.info(f"Next scheduled sentinel run: {next_run}")
+                    logger.info(f"Next scheduled sentinel run computed as: {next_run}")
             
             # Sleep briefly before checking the time again
             await asyncio.sleep(30)

@@ -21,6 +21,7 @@ class AllowlistEntryUpdate(BaseModel):
     justification: str | None = None
     status: str | None = None
 
+@router.get("", response_model=List[dict])
 @router.get("/", response_model=List[dict])
 def list_allowlist(db: Session = Depends(get_db)):
     records = db.query(AllowlistModel).all()
@@ -38,6 +39,7 @@ def list_allowlist(db: Session = Depends(get_db)):
         for r in records
     ]
 
+@router.post("", response_model=dict)
 @router.post("/", response_model=dict)
 def create_allowlist_entry(entry: AllowlistEntryCreate, db: Session = Depends(get_db)):
     db_obj = AllowlistModel(

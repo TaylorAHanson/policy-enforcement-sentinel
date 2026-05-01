@@ -2,7 +2,7 @@ from mcp.server.fastmcp import FastMCP
 import asyncio
 from app.services.sentinel_service import SentinelService
 
-mcp = FastMCP("Policy Enforcement Sentinel", description="Policy enforcement MCP server")
+mcp = FastMCP("Policy Enforcement Sentinel")
 
 @mcp.tool()
 async def trigger_sentinel_run(workspace: str = "ws-enterprise-prod", environment: str = "prod", mode: str = "audit") -> str:

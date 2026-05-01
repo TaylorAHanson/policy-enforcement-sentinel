@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException
 
 router = APIRouter()
 
+@router.get("")
 @router.get("/")
 async def get_readme():
     """

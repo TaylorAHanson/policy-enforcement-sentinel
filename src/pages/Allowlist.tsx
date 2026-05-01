@@ -17,11 +17,12 @@ export default function Allowlist() {
   const fetchEntries = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/v1/allowlist/');
+      const res = await fetch('/api/v1/allowlist');
       const data = await res.json();
-      setEntries(data);
+      setEntries(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
+      setEntries([]);
     } finally {
       setLoading(false);
     }
@@ -34,7 +35,7 @@ export default function Allowlist() {
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await fetch('/api/v1/allowlist/', {
+      await fetch('/api/v1/allowlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newEntry)
