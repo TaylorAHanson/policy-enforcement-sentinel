@@ -126,7 +126,7 @@ export default function SentinelDashboard() {
           <button
             onClick={() => triggerRun('audit')}
             disabled={triggering}
-            className="flex items-center px-4 py-2 bg-[#1b232d] text-slate-300 border border-slate-700 rounded-md hover:bg-[#252f3d] hover:text-slate-100 disabled:opacity-50 text-sm font-medium transition-colors"
+            className="inline-flex items-center justify-center h-8 px-3 bg-[#1b232d] text-slate-300 border border-slate-700 rounded-[4px] hover:bg-[#252f3d] hover:text-slate-100 disabled:opacity-50 text-[13px] font-medium transition-colors"
           >
             {triggering ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Search className="w-4 h-4 mr-2" />}
             Run Audit

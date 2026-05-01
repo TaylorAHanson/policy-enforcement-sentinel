@@ -92,7 +92,7 @@ targets:
     workspace:
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
-      app_name: "policy-enforcement-sentinel-local-${var.dev_user}"
+      app_name: "pe-sentinel-local-${var.dev_user}"
       environment: "local"
       source_code_path: "."
 
@@ -109,7 +109,7 @@ targets:
     workspace:
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
     variables:
-      app_name: "policy-enforcement-sentinel-dev"
+      app_name: "pe-sentinel-dev"
       environment: "dev"
       source_code_path: "."
 
@@ -126,7 +126,7 @@ targets:
     workspace:
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
     variables:
-      app_name: "policy-enforcement-sentinel-stage"
+      app_name: "pe-sentinel-stage"
       environment: "stage"
       source_code_path: "."
 
@@ -143,6 +143,6 @@ targets:
     workspace:
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
     variables:
-      app_name: "policy-enforcement-sentinel-prod"
+      app_name: "pe-sentinel-prod"
       environment: "prod"
       source_code_path: "."
