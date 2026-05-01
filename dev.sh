@@ -128,7 +128,7 @@ if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
     cd backend
     LOCAL_PYTHON_CMD="${PYTHON_CMD#backend/}"
     $LOCAL_PYTHON_CMD -m pip install --upgrade pip > /dev/null 2>&1
-    $LOCAL_PYTHON_CMD -m pip install -r requirements.txt
+    $LOCAL_PYTHON_CMD -m pip install -r ../requirements.txt
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓ Dependencies installed${NC}"
     else

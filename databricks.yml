@@ -61,6 +61,7 @@ resources:
 
 sync:
   include:
+    - requirements.txt
     - package.json
     - vite.config.ts
     - tsconfig.json
