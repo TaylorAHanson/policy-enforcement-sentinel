@@ -6,7 +6,7 @@ from datetime import datetime
 from app.core.config import settings
 from app.providers.databricks.client import DatabricksProvider
 from app.providers.opa.client import OpaProvider
-from app.db.session import SessionLocal
+from app.db.session import get_session_local
 from app.db.allowlist import AllowlistModel
 
 from app.providers.databricks.handlers import (
@@ -92,6 +92,7 @@ class SentinelService:
         workspace_type = "enterprise" if "enterprise" in workspace_name else "domain"
         
         # Fetch allowlist records
+        SessionLocal = get_session_local()
         db = SessionLocal()
         allowlist_objs = db.query(AllowlistModel).filter(
             AllowlistModel.workspace == workspace_name,
