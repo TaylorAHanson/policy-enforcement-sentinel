@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "policy-enforcement-sentinel"
