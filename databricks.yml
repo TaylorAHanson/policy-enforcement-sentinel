@@ -70,18 +70,30 @@ sync:
     - src/**
     - public/**
     - backend/**
+    - policies/**
     - README.md
   exclude:
+    - node_modules
     - package-lock.json
     - backend/__pycache__/**
+    - backend/**/__pycache__/**
     - backend/**/*.pyc
+    - backend/**/*.pyo
     - backend/venv/**
-    - backend/.env*
+    - backend/.venv/**
+    - backend/.env
+    - backend/.env.*
     - backend/*.db
-    - .DS_Store
+    - backend/.DS_Store
+    - backend/**/.DS_Store
+    - backend/.pytest_cache/**
+    - backend/.mypy_cache/**
+    - backend/*.egg-info/**
     - backend/dist/**
     - backend/build/**
     - backend/*.log
+    - backend/.git/**
+    - backend/.gitignore
 
 variables:
   dev_user:
