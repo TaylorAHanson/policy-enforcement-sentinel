@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     BRANDING_PRIMARY_COLOR: str = "#3253DC"
     BRANDING_SECONDARY_COLOR: str = "#000000"
 
+    SMTP_SERVER: str = "localhost"
+    SMTP_PORT: int = 1025
+    SMTP_USERNAME: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM_EMAIL: str = "admin@your-company.com"
+    SMTP_ADMIN_EMAIL: str = "admin@your-company.com"
+
     @property
     def get_policies_dir(self) -> str:
         import os

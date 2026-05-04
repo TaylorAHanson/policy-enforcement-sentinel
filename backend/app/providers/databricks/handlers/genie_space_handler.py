@@ -30,6 +30,7 @@ class GenieSpaceResourceHandler(BaseResourceHandler):
             logger.error(f"Failed to delete Genie space {resource_id}: {e}")
             return False
 
-    async def warn(self, resource_id: str, message: str) -> bool:
+    async def warn(self, resource_id: str, message: str, owner: str = "unknown") -> bool:
+        from app.providers.notifications.email import EmailNotifier
         logger.info(f"Warning owner of Genie space {resource_id}: {message}")
-        return True
+        return EmailNotifier().send_warning(owner, resource_id, message)

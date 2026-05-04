@@ -34,6 +34,7 @@ class NotebookResourceHandler(BaseResourceHandler):
             logger.error(f"Failed to delete Notebook {resource_id}: {e}")
             return False
 
-    async def warn(self, resource_id: str, message: str) -> bool:
+    async def warn(self, resource_id: str, message: str, owner: str = "unknown") -> bool:
+        from app.providers.notifications.email import EmailNotifier
         logger.info(f"Warning owner of Notebook {resource_id}: {message}")
-        return True
+        return EmailNotifier().send_warning(owner, resource_id, message)

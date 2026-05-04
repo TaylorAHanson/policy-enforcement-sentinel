@@ -199,7 +199,8 @@ class SentinelService:
                             await handler.kill(resource_id)
                     elif action == "WARN":
                         if hasattr(handler, "warn"):
-                            await handler.warn(resource_id, reason)
+                            owner = violation.get("resource_details", {}).get("owner", "unknown")
+                            await handler.warn(resource_id, reason, owner)
                     elif action == "CERTIFY":
                         if hasattr(handler, "certify"):
                             await handler.certify(resource_id)
@@ -215,6 +216,19 @@ class SentinelService:
             
             if enforce_tasks:
                 await asyncio.gather(*enforce_tasks)
+
+        # Send final report
+        try:
+            from app.providers.notifications.email import EmailNotifier
+            admin_email = settings.SMTP_ADMIN_EMAIL
+            EmailNotifier().send_report(
+                to_email=admin_email,
+                workspace=workspace_name,
+                mode=mode,
+                violations=violations
+            )
+        except Exception as e:
+            logger.error(f"Failed to send final run report: {e}")
 
         return {
             "total_scanned": len(discovered_resources),

@@ -209,8 +209,14 @@ const slides = [
         <p className="text-xl text-slate-300 mb-4">
           Want to go deeper? Pick your poison:
         </p>
-        
+
         <div className="grid grid-cols-3 gap-6">
+          
+          <div className="bg-[#11151c] border border-slate-800 rounded-lg p-6 hover:bg-[#1a212b] transition-colors cursor-pointer group">
+            <h3 className="text-xl font-semibold text-[#8acaff] group-hover:text-white transition-colors mb-2">Throw a Scenario!</h3>
+            <p className="text-slate-400 text-base">"Can it do XYZ if A=B?"</p>
+          </div>
+          
           <div className="bg-[#11151c] border border-slate-800 rounded-lg p-6 hover:bg-[#1a212b] transition-colors cursor-pointer group">
             <h3 className="text-xl font-semibold text-[#8acaff] group-hover:text-white transition-colors mb-2">Code Tour</h3>
             <p className="text-slate-400 text-base">Show me the discovery and enforcement handlers.</p>
@@ -227,14 +233,9 @@ const slides = [
           </div>
           
           <div className="bg-[#11151c] border border-slate-800 rounded-lg p-6 hover:bg-[#1a212b] transition-colors cursor-pointer group">
-            <h3 className="text-xl font-semibold text-[#8acaff] group-hover:text-white transition-colors mb-2">Lifecycle Layers</h3>
-            <p className="text-slate-400 text-base">Using this across Request, Provision, and Monitor phases.</p>
-          </div>
-
-          <div className="bg-[#11151c] border border-slate-800 rounded-lg p-6 hover:bg-[#1a212b] transition-colors cursor-pointer group">
-            <h3 className="text-xl font-semibold text-[#8acaff] group-hover:text-white transition-colors mb-2">Throw a Scenario!</h3>
-            <p className="text-slate-400 text-base">"Can it do XYZ if A=B?"</p>
-          </div>
+            <h3 className="text-xl font-semibold text-[#8acaff] group-hover:text-white transition-colors mb-2">Enforce ODCS/ODPS</h3>
+            <p className="text-slate-400 text-base">Using this as the mechanism for enforcing ODCS/ODPS.</p>
+          </div>          
 
           <div className="bg-[#11151c] border border-slate-800 rounded-lg p-6 hover:bg-[#1a212b] transition-colors cursor-pointer group">
             <h3 className="text-xl font-semibold text-[#8acaff] group-hover:text-white transition-colors mb-2">Splunk Integration</h3>

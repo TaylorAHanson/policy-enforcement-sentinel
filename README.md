@@ -231,6 +231,37 @@ For example, to enforce actions, the Service Principal may need:
 
 ---
 
+## Extending the Sentinel
+
+### Implementing Notification Providers
+
+While the destructive actions (`KILL`, `CERTIFY`, `UNCERTIFY`) interact directly with the Databricks SDK, the `WARN` action requires an external notification provider (like Email, Slack, Microsoft Teams, or Jira).
+
+By default, the Sentinel includes an SMTP Email provider. When a policy evaluates to `WARN`, the Sentinel will look up the resource owner's email address and send them a warning notification.
+
+**To configure the built-in Email Notifications:**
+Update your `.env` or `databricks.yml` to include your SMTP settings. If no settings are provided, it defaults to a local Mailpit instance (`localhost:1025`) for local testing:
+
+```yaml
+env:
+  - name: SMTP_SERVER
+    value: "localhost"
+  - name: SMTP_PORT
+    value: "1025"
+  - name: SMTP_USERNAME
+    value: ""
+  - name: SMTP_PASSWORD
+    value: ""
+  - name: SMTP_FROM_EMAIL
+    value: "sentinel@databricks.com"
+```
+
+**To implement a custom provider (e.g., Slack):**
+1. Create a new provider class in `backend/app/providers/notifications/`.
+2. Update the `warn()` method inside the specific resource handlers (`backend/app/providers/databricks/handlers/*.py`) to instantiate and call your new provider instead of the default `EmailNotifier`.
+
+---
+
 ## The Unvarnished Truth
 
 - **Not a replacement for Unity Catalog:** If you can manage permissions and rules natively in Unity Catalog, prefer that over this!

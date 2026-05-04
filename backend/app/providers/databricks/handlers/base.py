@@ -30,7 +30,7 @@ class BaseResourceHandler(ABC):
         pass
 
     @abstractmethod
-    async def warn(self, resource_id: str, message: str) -> bool:
+    async def warn(self, resource_id: str, message: str, owner: str = "unknown") -> bool:
         """
         Send a targeted warning to the resource owner.
         Returns True if successful.
