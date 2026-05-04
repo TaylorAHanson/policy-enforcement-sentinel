@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
-import { Shield, Code, BookOpen, ShieldCheck, MonitorPlay } from 'lucide-react';
+import { Shield, Code, BookOpen, ShieldCheck, MonitorPlay, ExternalLink } from 'lucide-react';
 import SentinelDashboard from './pages/SentinelDashboard';
 import PolicyEditor from './pages/PolicyEditor';
 import QuickReference from './pages/QuickReference';
@@ -82,6 +82,19 @@ function Layout({ children, branding }: { children: React.ReactNode, branding: a
             <MonitorPlay className="w-4 h-4 mr-3" />
             Presentation
           </NavLink>
+
+          <a
+            href="https://github.com/databricks-field-eng/policy-enforcement-sentinel"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-between px-3 py-2 text-sm font-medium rounded-md transition-colors text-[#e8ecf0] hover:bg-[#8acaff14] hover:text-[#8acaff]"
+          >
+            <div className="flex items-center">
+              <Code className="w-4 h-4 mr-3" />
+              GitHub Repo
+            </div>
+            <ExternalLink className="w-3 h-3 opacity-50" />
+          </a>
         </nav>
       </aside>
       <main className="flex-1 overflow-auto bg-[#0b0f15] p-8">
