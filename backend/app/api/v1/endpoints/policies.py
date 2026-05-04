@@ -64,7 +64,7 @@ async def list_policies():
                 logger.error(f"GitHub API error fetching policies: {response.text}")
                 # Fallback to local on error
     
-    policies_dir = os.path.join(os.getcwd(), settings.POLICIES_DIR)
+    policies_dir = settings.get_policies_dir
     if not os.path.exists(policies_dir):
         return []
     
@@ -117,7 +117,7 @@ async def get_policy(policy_name: str):
             else:
                 logger.error(f"GitHub API error fetching {policy_name}: {response.text}")
 
-    policy_path = os.path.join(os.getcwd(), settings.POLICIES_DIR, policy_name)
+    policy_path = os.path.join(settings.get_policies_dir, policy_name)
     if not os.path.exists(policy_path):
         raise HTTPException(status_code=404, detail="Policy not found")
     
@@ -194,7 +194,7 @@ async def save_policy(policy_name: str, payload: PolicyContent):
     if not policy_name.endswith(".rego"):
         policy_name += ".rego"
         
-    policies_dir = os.path.join(os.getcwd(), settings.POLICIES_DIR)
+    policies_dir = settings.get_policies_dir
     if not os.path.exists(policies_dir):
         os.makedirs(policies_dir)
         
@@ -207,7 +207,7 @@ async def save_policy(policy_name: str, payload: PolicyContent):
 
 @router.delete("/{policy_name}")
 async def delete_policy(policy_name: str):
-    policy_path = os.path.join(os.getcwd(), settings.POLICIES_DIR, policy_name)
+    policy_path = os.path.join(settings.get_policies_dir, policy_name)
     if os.path.exists(policy_path):
         os.remove(policy_path)
         return {"message": "Policy deleted"}

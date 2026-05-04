@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
-import { Shield, Code, BookOpen, ShieldCheck } from 'lucide-react';
+import { Shield, Code, BookOpen, ShieldCheck, MonitorPlay } from 'lucide-react';
 import SentinelDashboard from './pages/SentinelDashboard';
 import PolicyEditor from './pages/PolicyEditor';
 import QuickReference from './pages/QuickReference';
 import Allowlist from './pages/Allowlist';
+import Presentation from './pages/Presentation';
 
 function Layout({ children, branding }: { children: React.ReactNode, branding: any }) {
   return (
@@ -63,6 +64,24 @@ function Layout({ children, branding }: { children: React.ReactNode, branding: a
             <BookOpen className="w-4 h-4 mr-3" />
             Quick Reference
           </NavLink>
+          
+          <div className="pt-4 pb-2">
+            <div className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+              Extras
+            </div>
+          </div>
+          
+          <NavLink
+            to="/presentation"
+            className={({ isActive }) =>
+              `flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                isActive ? 'bg-[#8acaff14] text-[#8acaff]' : 'text-[#e8ecf0] hover:bg-[#8acaff14] hover:text-[#8acaff]'
+              }`
+            }
+          >
+            <MonitorPlay className="w-4 h-4 mr-3" />
+            Presentation
+          </NavLink>
         </nav>
       </aside>
       <main className="flex-1 overflow-auto bg-[#0b0f15] p-8">
@@ -98,6 +117,7 @@ export default function App() {
           <Route path="/policies" element={<PolicyEditor />} />
           <Route path="/allowlist" element={<Allowlist />} />
           <Route path="/reference" element={<QuickReference />} />
+          <Route path="/presentation" element={<Presentation />} />
         </Routes>
       </Layout>
     </BrowserRouter>
