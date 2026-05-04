@@ -32,6 +32,16 @@ export default function Allowlist() {
     fetchEntries();
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showAddModal) {
+        setShowAddModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showAddModal]);
+
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     try {

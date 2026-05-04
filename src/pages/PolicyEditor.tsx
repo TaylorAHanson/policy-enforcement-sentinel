@@ -28,6 +28,16 @@ export default function PolicyEditor() {
     fetchPolicies();
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showDiffModal) {
+        setShowDiffModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showDiffModal]);
+
   const fetchConfig = async () => {
     try {
       const res = await fetch('/api/v1/policies/config');

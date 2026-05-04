@@ -52,6 +52,22 @@ export default function SentinelDashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (selectedViolation) {
+          setSelectedViolation(null);
+        } else if (showConfirmModal) {
+          setShowConfirmModal(false);
+        } else if (activeRunId) {
+          setActiveRunId(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedViolation, showConfirmModal, activeRunId]);
+
   const triggerRun = async (mode: 'audit' | 'enforce') => {
     setShowConfirmModal(false);
     setTriggering(true);
