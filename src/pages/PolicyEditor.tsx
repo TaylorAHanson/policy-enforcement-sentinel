@@ -94,6 +94,7 @@ export default function PolicyEditor() {
       resourceType = "job";
       attributes = {
         "creator": "user@example.com",
+        "idle_days": 65,
         "settings": {
           "email_notifications": {}
         }
@@ -129,8 +130,10 @@ export default function PolicyEditor() {
       resource: {
         id: `example-${resourceType.replace(/_/g, '-')}`,
         type: resourceType,
-        attributes: attributes
-      }
+        ...attributes
+      },
+      allowlist_records: [],
+      request_time: new Date().toISOString()
     }, null, 2);
   };
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, PlayCircle, ExternalLink } from 'lucide-react';
 
 const MagicPhraseSlide = () => {
@@ -30,10 +30,6 @@ const MagicPhraseSlide = () => {
         )}
       </h1>
       
-      <p className={`text-2xl text-slate-400 text-center max-w-2xl transition-opacity duration-1000 ${step >= 2 ? 'opacity-100' : 'opacity-0'}`}>
-        Say this to an Enterprise Architect or Security Architect and watch them go <span className="font-bold text-white">bananas</span>.
-      </p>
-      
       {step < 2 && (
         <div className="absolute bottom-0 animate-pulse text-slate-500 text-base font-medium">
           Click anywhere to reveal...
@@ -57,8 +53,8 @@ const slides = [
         <div className="bg-[#11151c] border border-slate-800 rounded-lg p-8 mt-8">
           <h3 className="text-xl font-semibold text-[#8acaff] mb-4">The Complexity Reality: What Natively Falls Through the Cracks</h3>
           <ul className="space-y-4 text-slate-300 list-disc list-inside text-lg">
-            <li>"All clusters and jobs must have a 'CostCenter' tag"</li>
-            <li>"Dashboards cannot be shared with 'All Workspace Users'"</li>
+            <li>"Production jobs must have timeout + failure notification configured"</li>
+            <li>"Dashboards with embedded credentials cannot be shared with 'All Workspace Users'"</li>
             <li>"Service Principals cannot be granted Workspace Admin privileges"</li>
             <li>"Workspace assets (Jobs, Dashboards) cannot be owned by deactivated users"</li>
           </ul>
@@ -130,7 +126,7 @@ const slides = [
     content: (
       <div className="space-y-8">
         <p className="text-xl text-slate-300 flex items-center justify-between">
-          <span>How does this mechanically work at a workspace level? Introducing the reusable asset.</span>
+          <span>How does this mechanically work at a workspace level? </span>
           <span className="text-sm px-4 py-1.5 bg-[#ff3621]/10 text-[#ff3621] border border-[#ff3621]/20 rounded-full font-medium flex items-center">
             Runs as a Databricks App
           </span>
@@ -159,9 +155,11 @@ const slides = [
             <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500"></div>
             <h3 className="text-xl font-semibold text-white mb-4 flex flex-col gap-2">
               <span className="bg-slate-800 text-slate-300 text-sm px-2 py-1 rounded w-fit">PHASE 3</span>
-              Notification
+              Notification & Logging
             </h3>
-            <p className="text-slate-400 text-base flex-1">We notify. Maybe that's the governance team, maybe that's policy violators directly.</p>
+            <p className="text-slate-400 text-base flex-1">We notify. Maybe that's the governance team, maybe that's policy violators directly or their managers.</p>
+            <p className="text-slate-400 text-base flex-1 mt-5">We log, and stream to SIEM. </p>
+
           </div>
         </div>
         
@@ -174,7 +172,7 @@ const slides = [
     )
   },
   {
-    title: "The Unvarnished Truth",
+    title: "Buyer Beware",
     content: (
       <div className="space-y-6">
         <div className="grid grid-cols-3 gap-4">
