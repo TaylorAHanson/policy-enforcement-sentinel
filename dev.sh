@@ -155,6 +155,23 @@ else
 fi
 
 echo "=== Backend started at $(date) ===" > ../backend.log
+
+# Local-dev preflight: report config health and, where Databricks credentials
+# are missing from backend/.env, resolve them from your own CLI login and export
+# them so the backend runs as you. Also exports credentials that *are* in .env,
+# because pydantic loads that file into the settings object rather than into the
+# environment — so without this, anything building a bare WorkspaceClient()
+# authenticates as whatever ~/.databrickscfg names as DEFAULT.
+#
+# stdout carries `export KEY=...` lines, which are eval'd here. The report goes
+# to stderr and straight to your terminal. No-ops on a deployed runtime.
+if [ -f "scripts/local_dev_preflight.py" ]; then
+    PREFLIGHT_EXPORTS=$($LOCAL_PYTHON_CMD scripts/local_dev_preflight.py --export)
+    if [ ! -z "$PREFLIGHT_EXPORTS" ]; then
+        eval "$PREFLIGHT_EXPORTS"
+    fi
+fi
+
 if [ "$DEBUG_MODE" = true ]; then
     $LOCAL_PYTHON_CMD -m pip install debugpy
     $LOCAL_PYTHON_CMD -m debugpy --listen 0.0.0.0:5678 -m uvicorn app.main:app --reload --port 8000 >> ../backend.log 2>&1 &

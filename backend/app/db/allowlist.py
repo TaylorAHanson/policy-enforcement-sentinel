@@ -18,5 +18,9 @@ class AllowlistModel(Base):
     workspace: Mapped[str] = Column(String, nullable=False, index=True, comment="The workspace ID or name where this resource lives")
     justification: Mapped[str] = Column(String, nullable=False, comment="Reason for the exception")
     status: Mapped[str] = Column(String, nullable=False, default="approved", index=True, comment="Status: pending, approved, rejected")
+    # Null means the exception never expires. Rego has to test for that
+    # explicitly: `not exception.expires_at` does not match a JSON null, so an
+    # expiry-less exception silently failed to apply before this was handled.
+    expires_at: Mapped[Optional[datetime]] = Column(DateTime, nullable=True, comment="When the exception lapses; null never expires")
     created_at: Mapped[datetime] = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

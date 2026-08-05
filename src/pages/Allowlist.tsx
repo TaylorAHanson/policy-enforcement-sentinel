@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { ShieldCheck, Plus, Trash2, Search, RefreshCw, X } from 'lucide-react';
+import type { AllowlistEntry } from '../services/api';
 
 export default function Allowlist() {
-  const [entries, setEntries] = useState<any[]>([]);
+  const [entries, setEntries] = useState<AllowlistEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   

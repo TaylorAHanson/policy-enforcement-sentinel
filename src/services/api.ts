@@ -1,0 +1,724 @@
+/**
+ * The single place the frontend talks to the backend.
+ *
+ * Every call goes through `request()`, which means one implementation of error
+ * handling, JSON parsing, and query-string building rather than a slightly
+ * different one at each of the forty-odd call sites. Before this, a failed
+ * request surfaced as `undefined` propagating into a component and rendering
+ * as a blank panel with no indication anything had gone wrong.
+ *
+ * Types here mirror the backend's serialisers. They are hand-written rather
+ * than generated, so when a serialiser changes, this file changes with it.
+ */
+
+const BASE = "/api/v1";
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly detail?: unknown;
+
+  constructor(message: string, status: number, detail?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+type QueryValue = string | number | boolean | null | undefined;
+
+function buildQuery(params?: Record<string, QueryValue>): string {
+  if (!params) return "";
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    // Omitting empty values keeps "no filter" out of the URL entirely, rather
+    // than sending `severity=` and asking the backend to treat it as absent.
+    if (value === null || value === undefined || value === "") continue;
+    search.append(key, String(value));
+  }
+  const qs = search.toString();
+  return qs ? `?${qs}` : "";
+}
+
+async function request<T>(
+  path: string,
+  options: RequestInit & { params?: Record<string, QueryValue> } = {},
+): Promise<T> {
+  const { params, ...init } = options;
+  const response = await fetch(`${BASE}${path}${buildQuery(params)}`, {
+    headers:
+      init.body && !(init.body instanceof FormData)
+        ? { "Content-Type": "application/json", ...init.headers }
+        : init.headers,
+    ...init,
+  });
+
+  if (!response.ok) {
+    // FastAPI puts the useful message in `detail`, which may be a string or a
+    // list of validation errors. Both are worth showing; the status code alone
+    // tells an operator nothing about which field they got wrong.
+    let detail: unknown;
+    let message = `${response.status} ${response.statusText}`;
+    try {
+      const body = await response.json();
+      detail = body?.detail ?? body;
+      if (typeof detail === "string") {
+        message = detail;
+      } else if (Array.isArray(detail) && detail.length) {
+        message = detail
+          .map((e: { loc?: string[]; msg?: string }) =>
+            e.msg ? `${e.loc?.slice(1).join(".") ?? ""} ${e.msg}`.trim() : String(e),
+          )
+          .join("; ");
+      }
+    } catch {
+      /* Body was not JSON; the status line is all we have. */
+    }
+    throw new ApiError(message, response.status, detail);
+  }
+
+  if (response.status === 204) return undefined as T;
+
+  const text = await response.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+const get = <T>(path: string, params?: Record<string, QueryValue>) =>
+  request<T>(path, { method: "GET", params });
+
+const post = <T>(path: string, body?: unknown, params?: Record<string, QueryValue>) =>
+  request<T>(path, {
+    method: "POST",
+    body: body === undefined ? undefined : JSON.stringify(body),
+    params,
+  });
+
+const put = <T>(path: string, body?: unknown) =>
+  request<T>(path, {
+    method: "PUT",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+const del = <T>(path: string, params?: Record<string, QueryValue>) =>
+  request<T>(path, { method: "DELETE", params });
+
+// --- Types ------------------------------------------------------------------
+
+export type ScanMode = "audit" | "remediate" | "enforce";
+
+/** Mirrors ActionTier in app/core/actions.py. */
+export const ActionTier = {
+  Observe: 0,
+  Notify: 1,
+  Restrict: 2,
+  Destructive: 3,
+} as const;
+
+export type ActionTier = (typeof ActionTier)[keyof typeof ActionTier];
+
+export const TIER_LABELS: Record<number, string> = {
+  0: "Observe",
+  1: "Notify",
+  2: "Restrict",
+  3: "Destructive",
+};
+
+export interface ActionSpec {
+  action: string;
+  tier: number;
+  tier_label: string;
+  reversible: boolean;
+  destructive: boolean;
+  description: string;
+  handler_method: string | null;
+  undo_method: string | null;
+}
+
+export interface SentinelRun {
+  id: string;
+  workspace: string;
+  environment: string;
+  mode: ScanMode;
+  status: "running" | "completed" | "failed" | string;
+  started_at: string | null;
+  completed_at: string | null;
+  error: string | null;
+  total_resources: number;
+  violation_count: number;
+  check_count: number;
+  remediated_count: number;
+  downgraded_count: number;
+  approved_by: string | null;
+  results?: Record<string, unknown> | null;
+}
+
+export interface Finding {
+  id: number;
+  run_id: string;
+  kind: "violation" | "check" | string;
+  workspace: string;
+  environment: string | null;
+  resource_id: string;
+  resource_type: string;
+  resource_name: string | null;
+  owner: string | null;
+  policy: string | null;
+  rule_id: string | null;
+  policy_id: string | null;
+  category: string | null;
+  severity: string | null;
+  message: string;
+  requested_action: string | null;
+  effective_action: string | null;
+  tier: number | null;
+  requested_tier: number | null;
+  downgraded: boolean;
+  downgrade_reason: string | null;
+  executed: boolean;
+  data: Record<string, unknown> | null;
+  created_at: string | null;
+}
+
+/** The envelope every server-paginated list shares. */
+export interface Paginated {
+  total: number;
+  skip: number;
+  limit: number;
+}
+
+export interface RunsPage extends Paginated {
+  runs: SentinelRun[];
+}
+
+export interface FindingsPage extends Paginated {
+  findings: Finding[];
+}
+
+export interface FacetValue {
+  value: string;
+  count: number;
+}
+
+export interface Facets {
+  severity: FacetValue[];
+  category: FacetValue[];
+  resource_type: FacetValue[];
+  policy: FacetValue[];
+  policy_id: FacetValue[];
+  effective_action: FacetValue[];
+}
+
+/**
+ * The index signature is what lets these go straight to `buildQuery`, which
+ * drops empty values. Listing the keys explicitly as well keeps a typo in a
+ * filter name a compile error rather than a silently ignored parameter.
+ */
+export interface FindingFilters extends Record<string, QueryValue> {
+  kind?: string;
+  severity?: string;
+  category?: string;
+  resource_type?: string;
+  effective_action?: string;
+  downgraded_only?: boolean;
+  search?: string;
+  skip?: number;
+  limit?: number;
+}
+
+export interface PreflightTier {
+  tier: number;
+  count: number;
+  resources: Array<{
+    resource_id: string;
+    resource_type: string;
+    resource_name: string | null;
+    owner: string | null;
+    policy: string | null;
+    policy_id: string | null;
+    requested_action: string;
+    workspace: string;
+  }>;
+  truncated: boolean;
+}
+
+export interface Preflight {
+  run_id: string;
+  workspaces: string[];
+  by_tier: PreflightTier[];
+  destructive_count: number;
+  blast_radius_limit: number;
+  exceeds_blast_radius: boolean;
+  enforcement_enabled: boolean;
+  allowed_workspaces: string[];
+  action_ladder: ActionSpec[];
+}
+
+export interface AuditEntry {
+  id: number;
+  run_id: string | null;
+  workspace: string;
+  resource_id: string;
+  resource_type: string;
+  policy: string | null;
+  requested_action: string;
+  effective_action: string;
+  tier: number;
+  downgrade_reason: string | null;
+  outcome: string;
+  error: string | null;
+  undoable: boolean;
+  undone_at: string | null;
+  started_at: string | null;
+}
+
+export interface PolicyRule {
+  rule: string;
+  id: string;
+  category: string;
+  severity: string;
+  description: string;
+  requested_action: string;
+  tier: number;
+  tier_label: string;
+  destructive: boolean;
+  escalate_after_days: number;
+}
+
+export interface PolicyMetadata {
+  name: string;
+  package: string;
+  file: string;
+  title: string;
+  description: string;
+  owner: string;
+  domain: string;
+  resource_type: string;
+  authors: string[];
+  rules: PolicyRule[];
+  rule_count: number;
+  max_tier: number;
+  uncommitted_changes?: boolean;
+}
+
+export interface PolicyRegistry {
+  policies: PolicyMetadata[];
+  summary: {
+    policy_count: number;
+    rule_count: number;
+    by_category: Record<string, number>;
+    by_severity: Record<string, number>;
+    by_tier: Record<string, number>;
+    destructive_rule_count: number;
+    max_tier: number;
+  };
+  action_ladder: ActionSpec[];
+  renamed_policies: Array<{ legacy_name: string; replaced_by: string[] }>;
+  history_available: boolean;
+}
+
+export interface PolicyRevision {
+  sha: string;
+  short_sha: string;
+  author: string;
+  author_email: string;
+  date: string;
+  subject: string;
+}
+
+/**
+ * The state of the local policy working copy.
+ *
+ * `ok` means it was rebuilt from the target branch. `local` means the backend
+ * is running against a git checkout and manages it with git instead.
+ * `disabled` means GitHub is unconfigured, so the policies are whatever the
+ * deployment shipped with.
+ */
+export interface PolicySyncStatus {
+  status: "ok" | "failed" | "local" | "disabled" | "never";
+  detail: string;
+  at: string | null;
+  commit: string | null;
+  written: string[];
+  removed: string[];
+  configured: boolean;
+  local_checkout: boolean;
+  repo: string | null;
+  branch: string;
+  interval_seconds: number;
+}
+
+export interface AllowlistEntry {
+  /** A UUID generated by the application, not a sequence. */
+  id: string;
+  resource_id: string;
+  resource_type: string;
+  workspace: string;
+  justification: string;
+  status: string;
+  expires_at?: string | null;
+  created_at?: string | null;
+}
+
+export type SettingType =
+  | "bool"
+  | "int"
+  | "string"
+  | "select"
+  | "color"
+  | "cron";
+
+export interface CronPreview {
+  expression: string;
+  valid: boolean;
+  error: string | null;
+  /** Blank is a legitimate value: it turns scheduled scanning off. */
+  disabled: boolean;
+  next_runs: string[];
+}
+
+export interface SettingDefinition {
+  key: string;
+  group: string;
+  label: string;
+  help: string;
+  type: SettingType;
+  value: unknown;
+  overridden: boolean;
+  danger: boolean;
+  options?: string[];
+}
+
+export interface SettingGroup {
+  name: string;
+  danger: boolean;
+  fields: SettingDefinition[];
+}
+
+export interface SettingsSchema {
+  groups: SettingGroup[];
+  enforcement_enabled: boolean;
+  destructive_workspaces: string[];
+  gates: Array<{ gate: string; description: string }>;
+  action_ladder: ActionSpec[];
+}
+
+export interface Branding {
+  name?: string;
+  logo_url?: string;
+  primary_color?: string;
+}
+
+export interface Release {
+  version: string;
+  date: string;
+  title: string;
+  /** The one line worth reading if you read nothing else. */
+  highlight: string;
+  body: string;
+}
+
+// --- The policy assistant ---------------------------------------------------
+
+export interface AgentStatus {
+  enabled: boolean;
+  configured: boolean;
+  model: string;
+  via_gateway: boolean;
+  reasoning_effort: string;
+  max_iterations: number;
+  tools: string[];
+  /** The highest tier the assistant is permitted to generate. Enforced server-side. */
+  max_generated_tier: number;
+  tracing_enabled: boolean;
+}
+
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AgentToolCall {
+  tool: string;
+  arguments: Record<string, unknown>;
+  error?: string | null;
+}
+
+export interface AgentAnswer {
+  answer: string;
+  /** True when the loop hit its iteration or time limit. The answer is partial. */
+  truncated: boolean;
+  tool_calls: AgentToolCall[];
+}
+
+export interface AuthoredPolicy {
+  content: string;
+  policy_name: string;
+  package: string;
+  is_new_file: boolean;
+  valid: boolean;
+  validation_errors: string[];
+  attempts: number;
+  max_tier: number;
+  requested_actions: string[];
+}
+
+/** A 422 from `/agent/author`: the model asked for more than Tier 2. */
+export interface GuardrailViolation {
+  error: "guardrail_violation";
+  violations: string[];
+  remedy: string;
+}
+
+export interface PrNotes {
+  body: string;
+  /** Rendered first, and separately, because a reviewer must not scroll past one. */
+  escalations: string[];
+  action_changes: string[];
+  new_rules: string[];
+  blast_radius: {
+    run_id: number | null;
+    total_findings: number;
+    by_rule: Record<string, number>;
+    affected_owners: number;
+    available: boolean;
+  };
+  max_tier: number;
+}
+
+// --- Endpoints --------------------------------------------------------------
+
+export const api = {
+  branding: {
+    get: () => get<Branding>("/branding"),
+  },
+
+  sentinel: {
+    runs: (params?: {
+      skip?: number;
+      limit?: number;
+      search?: string;
+      status?: string;
+      summary?: boolean;
+    }) => get<RunsPage>("/sentinel/runs", params),
+
+    run: (runId: string) => get<SentinelRun>(`/sentinel/runs/${runId}`),
+
+    findings: (runId: string, filters?: FindingFilters) =>
+      get<FindingsPage>(`/sentinel/runs/${runId}/findings`, filters),
+
+    facets: (runId: string, filters?: FindingFilters) =>
+      get<Facets>(`/sentinel/runs/${runId}/facets`, filters),
+
+    /**
+     * Starts one run across every selected workspace. A single `run_id` covers
+     * all of them — they are one run, which is what makes the dashboard totals
+     * add up — so this is deliberately not a list of ids.
+     */
+    trigger: (body: { mode: ScanMode; workspaces?: string[]; approval_id?: string }) =>
+      post<{
+        message: string;
+        run_id: string;
+        mode: string;
+        workspaces: string[];
+      }>("/sentinel/run", body),
+
+    purge: (olderThanDays: number) =>
+      del<{ purged: number; older_than_days: number }>("/sentinel/runs", {
+        older_than_days: olderThanDays,
+      }),
+
+    preflight: (runId: string, mode: ScanMode = "enforce") =>
+      post<Preflight>("/sentinel/enforcement/preflight", { run_id: runId, mode }),
+
+    approve: (body: {
+      workspace: string;
+      approved_by: string;
+      confirm_workspace: string;
+    }) =>
+      post<{ approval_id: string; workspace: string; expires_in_minutes: number }>(
+        "/sentinel/enforcement/approve",
+        body,
+      ),
+
+    executeAction: (
+      runId: string,
+      body: {
+        resource_id: string;
+        resource_type: string;
+        action: string;
+        policy_name?: string;
+        reason?: string;
+        workspace?: string;
+      },
+    ) =>
+      post<{
+        success: boolean;
+        requested_action: string;
+        effective_action: string;
+        tier: number;
+        downgraded: boolean;
+        downgrade_reason: string | null;
+      }>(`/sentinel/runs/${runId}/enforcement-action`, body),
+
+    audit: (params?: {
+      run_id?: string;
+      undoable_only?: boolean;
+      skip?: number;
+      limit?: number;
+    }) => get<{ total: number; entries: AuditEntry[] }>("/sentinel/audit", params),
+
+    undo: (auditId: number, undoneBy?: string) =>
+      post<{
+        undone: boolean;
+        audit_id: number;
+        action: string;
+        resource_id: string;
+      }>(`/sentinel/actions/${auditId}/undo`, { undone_by: undoneBy }),
+  },
+
+  policies: {
+    list: () => get<string[]>("/policies/"),
+    get: (name: string) => get<{ name: string; content: string }>(`/policies/${name}`),
+    /**
+     * Proposes retiring a policy. There is no direct delete: the file lives in
+     * git, so removing it is a reviewed pull request like any other change.
+     */
+    remove: (name: string) =>
+      del<{ message: string; pr_url: string; branch: string }>(
+        `/policies/${name}`,
+      ),
+    validate: (policy_name: string, content: string) =>
+      post<{ valid: boolean; errors: string[]; skipped?: boolean }>(
+        "/policies/validate",
+        { policy_name, content },
+      ),
+    evaluate: (body: {
+      policy_name: string;
+      content: string;
+      query: string;
+      input_data: Record<string, unknown>;
+    }) =>
+      post<{ success: boolean; result?: unknown; error?: string }>(
+        "/policies/evaluate",
+        body,
+      ),
+    createPr: (name: string, content: string) =>
+      post<{
+        message: string;
+        pr_url: string;
+        branch: string;
+        escalations: string[];
+        explanation_committed: boolean;
+      }>(`/policies/${name}/pr`, { content }),
+    config: () => get<{ github_enabled: boolean; target_branch: string }>(
+      "/policies/config",
+    ),
+
+    /** How current the local working copy is against the target branch. */
+    syncStatus: () => get<PolicySyncStatus>("/policies/sync"),
+    sync: () => post<PolicySyncStatus>("/policies/sync", {}),
+
+    registry: () => get<PolicyRegistry>("/policies/metadata"),
+    metadata: (name: string) => get<PolicyMetadata>(`/policies/${name}/metadata`),
+    history: (name: string, limit = 50) =>
+      get<{
+        available: boolean;
+        reason?: string;
+        revisions: PolicyRevision[];
+        uncommitted_changes?: boolean;
+      }>(`/policies/${name}/history`, { limit }),
+    restore: (name: string) =>
+      post<{ name: string; content: string; uncommitted_changes: boolean }>(
+        `/policies/${name}/restore`,
+        {},
+      ),
+    revision: (name: string, sha: string, diff = false) =>
+      get<{ name: string; sha: string; diff: boolean; content: string }>(
+        `/policies/${name}/history/${sha}`,
+        { diff },
+      ),
+  },
+
+  allowlist: {
+    list: () => get<AllowlistEntry[]>("/allowlist/"),
+    create: (body: {
+      resource_id: string;
+      resource_type: string;
+      workspace: string;
+      justification: string;
+      status?: string;
+      expires_at?: string | null;
+    }) => post<AllowlistEntry>("/allowlist/", body),
+    remove: (id: string) => del<{ message: string }>(`/allowlist/${id}`),
+  },
+
+  settings: {
+    schema: () => get<SettingsSchema>("/settings"),
+    cronPreview: (expression: string) =>
+      get<CronPreview>("/settings/cron-preview", { expression }),
+    update: (key: string, value: unknown, updatedBy?: string) =>
+      put<{ key: string; value: unknown }>(`/settings/${key}`, {
+        value,
+        updated_by: updatedBy,
+      }),
+    updateMany: (values: Record<string, unknown>, updatedBy?: string) =>
+      put<{ applied: Record<string, unknown>; errors: Record<string, string> }>(
+        "/settings",
+        { values, updated_by: updatedBy },
+      ),
+    reset: (key: string) => del<{ key: string; value: unknown }>(`/settings/${key}`),
+  },
+
+  readme: {
+    get: () => get<{ content: string }>("/readme"),
+  },
+
+  agent: {
+    status: () => get<AgentStatus>("/agent/status"),
+
+    ask: (body: { question: string; history?: ChatTurn[] }) =>
+      post<AgentAnswer>("/agent/ask", body),
+
+    /** Returns a proposal. Saving it is a separate, human-initiated call. */
+    author: (body: {
+      instruction: string;
+      target_policy?: string;
+      existing_content?: string;
+    }) => post<AuthoredPolicy>("/agent/author", body),
+
+    /** Generates an explanation. Storing it means committing it in a PR. */
+    explain: (body: { policy_name: string; content: string }) =>
+      post<{ policy_name: string; explanation: string }>("/agent/explain", body),
+
+    /** The committed sibling `.md`. Offline and cheap; try this first. */
+    committedExplanation: (policyName: string) =>
+      get<{
+        policy_name: string;
+        explanation: string | null;
+        exists: boolean;
+      }>(`/agent/explain/${encodeURIComponent(policyName)}`),
+
+    prNotes: (body: {
+      policy_name: string;
+      new_content: string;
+      old_content?: string;
+    }) => post<PrNotes>("/agent/pr-notes", body),
+  },
+
+  releaseNotes: {
+    list: () =>
+      get<{
+        releases: Release[];
+        latest_version: string | null;
+        latest_highlight: string;
+      }>("/release-notes"),
+
+    /** Version and headline only, for the sidebar badge. Null on a fresh repo. */
+    latest: () =>
+      get<Omit<Release, "body" | "version"> & { version: string | null }>(
+        "/release-notes/latest",
+      ),
+  },
+};
+
+export default api;

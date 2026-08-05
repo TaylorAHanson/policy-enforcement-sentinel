@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSlug from 'rehype-slug';
@@ -8,7 +8,6 @@ import { BookOpen, RefreshCw, List } from 'lucide-react';
 export default function QuickReference() {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState(true);
-  const [headings, setHeadings] = useState<{ id: string; text: string; level: number }[]>([]);
 
   useEffect(() => {
     fetch('/api/v1/readme')
@@ -27,43 +26,47 @@ export default function QuickReference() {
       });
   }, []);
 
-  useEffect(() => {
-    if (content) {
-      const extractedHeadings: { id: string; text: string; level: number }[] = [];
-      const lines = content.split('\n');
-      const slugger = new GithubSlugger();
-      
-      let inCodeBlock = false;
-      
-      for (const line of lines) {
-        if (line.trim().startsWith('```')) {
-          inCodeBlock = !inCodeBlock;
-          continue;
-        }
-        
-        if (!inCodeBlock) {
-          const match = line.match(/^(#{1,3})\s+(.+)$/);
-          if (match) {
-            const level = match[1].length;
-            // Remove markdown links or other formatting from heading text for display
-            const rawText = match[2].trim();
-            const text = rawText.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[`*_*~]/g, '');
-            
-            // Generate slug based on the text that will be displayed
-            // This matches how rehype-slug generates IDs for the rendered HTML
-            const slug = slugger.slug(text);
-            
-            extractedHeadings.push({
-              level,
-              text,
-              id: slug
-            });
-          }
+  // Derived from the document rather than stored beside it. Holding this in
+  // state meant every load rendered once with an empty outline and again with
+  // the real one, and left two things that could disagree about the same
+  // markdown.
+  const headings = useMemo(() => {
+    if (!content) return [];
+
+    const extractedHeadings: { id: string; text: string; level: number }[] = [];
+    const lines = content.split('\n');
+    const slugger = new GithubSlugger();
+
+    let inCodeBlock = false;
+
+    for (const line of lines) {
+      if (line.trim().startsWith('```')) {
+        inCodeBlock = !inCodeBlock;
+        continue;
+      }
+
+      if (!inCodeBlock) {
+        const match = line.match(/^(#{1,3})\s+(.+)$/);
+        if (match) {
+          const level = match[1].length;
+          // Remove markdown links or other formatting from heading text for display
+          const rawText = match[2].trim();
+          const text = rawText.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[`*_*~]/g, '');
+
+          // Generate slug based on the text that will be displayed
+          // This matches how rehype-slug generates IDs for the rendered HTML
+          const slug = slugger.slug(text);
+
+          extractedHeadings.push({
+            level,
+            text,
+            id: slug
+          });
         }
       }
-      
-      setHeadings(extractedHeadings);
     }
+
+    return extractedHeadings;
   }, [content]);
 
   const scrollToHeading = (id: string, text: string) => {
@@ -161,19 +164,21 @@ export default function QuickReference() {
                 remarkPlugins={[remarkGfm]}
                 rehypePlugins={[rehypeSlug]}
                 components={{
-                  h1: ({node, ...props}) => {
+                  // `node` is pulled out of props so react-markdown's AST node
+                  // is not spread onto the DOM element.
+                  h1: ({node: _node, ...props}) => {
                     const text = Array.isArray(props.children) ? props.children.join('') : String(props.children);
                     const cleanText = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[`*_*~]/g, '');
                     const slug = new GithubSlugger().slug(cleanText);
                     return <h1 id={slug} data-heading-text={cleanText} className="scroll-mt-24" {...props} />;
                   },
-                  h2: ({node, ...props}) => {
+                  h2: ({node: _node, ...props}) => {
                     const text = Array.isArray(props.children) ? props.children.join('') : String(props.children);
                     const cleanText = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[`*_*~]/g, '');
                     const slug = new GithubSlugger().slug(cleanText);
                     return <h2 id={slug} data-heading-text={cleanText} className="scroll-mt-24" {...props} />;
                   },
-                  h3: ({node, ...props}) => {
+                  h3: ({node: _node, ...props}) => {
                     const text = Array.isArray(props.children) ? props.children.join('') : String(props.children);
                     const cleanText = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[`*_*~]/g, '');
                     const slug = new GithubSlugger().slug(cleanText);

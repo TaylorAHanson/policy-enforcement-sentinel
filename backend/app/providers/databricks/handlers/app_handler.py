@@ -1,36 +1,55 @@
+import asyncio
 import logging
-from typing import List, Dict, Any
-from app.providers.databricks.handlers.base import BaseResourceHandler
+from typing import Any, Dict, List
+
+from app.providers.databricks import destructive, permissions
+from app.providers.databricks.handlers.base import (
+    BaseResourceHandler,
+    SupportsDelete,
+    SupportsRevokeAccess,
+)
 
 logger = logging.getLogger(__name__)
 
-class AppResourceHandler(BaseResourceHandler):
+
+class AppResourceHandler(BaseResourceHandler, SupportsRevokeAccess, SupportsDelete):
+    """Databricks Apps."""
+
+    resource_type = "app"
+
     async def discover(self) -> List[Dict[str, Any]]:
         resources = []
-        try:
-            # Note: Requires databricks-sdk >= 0.20.0 for apps
-            apps = self.workspace_client.apps.list()
-            for app in apps:
-                resources.append({
+        for app in self.workspace_client.apps.list():
+            deployment = getattr(app, "active_deployment", None)
+            resources.append(
+                {
                     "id": app.name,
+                    "name": app.name,
                     "type": "app",
-                    "owner": getattr(app, 'creator', 'unknown'),
-                    "state": getattr(app.active_deployment, 'state', 'UNKNOWN') if getattr(app, 'active_deployment', None) else 'UNKNOWN',
-                    "tags": {}
-                })
-        except Exception as e:
-            logger.error(f"Failed to discover apps: {e}")
+                    "owner": getattr(app, "creator", "unknown"),
+                    "state": str(getattr(deployment, "state", "UNKNOWN"))
+                    if deployment
+                    else "UNKNOWN",
+                    "url": getattr(app, "url", None),
+                    "tags": {},
+                }
+            )
         return resources
-        
-    async def kill(self, resource_id: str) -> bool:
-        try:
-            self.workspace_client.apps.delete(name=resource_id)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to delete app {resource_id}: {e}")
-            return False
 
-    async def warn(self, resource_id: str, message: str, owner: str = "unknown") -> bool:
-        from app.providers.notifications.email import EmailNotifier
-        logger.info(f"Warning owner of app {resource_id}: {message}")
-        return EmailNotifier().send_warning(owner, resource_id, message)
+    async def revoke_access(self, resource_id: str, *, authorization=None) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            permissions.revoke_permissions, self.workspace_client, "app", resource_id
+        )
+
+    async def restore_access(self, resource_id: str, undo_payload: Dict[str, Any]) -> bool:
+        return await asyncio.to_thread(
+            permissions.restore_permissions, self.workspace_client, undo_payload
+        )
+
+    async def delete(self, resource_id: str, *, authorization) -> bool:
+        return await asyncio.to_thread(
+            destructive.delete_app,
+            self.workspace_client,
+            resource_id,
+            authorization=authorization,
+        )
