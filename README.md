@@ -19,12 +19,56 @@ The Sentinel operates mechanically at the workspace level in three phases:
 2. **Phase 2: Evaluation & Enforcement** The Sentinel evaluates each asset against your OPA policies. Based on the evaluation, what action do we take on a violation? Are we killing this on the spot? Are we flipping a tag or certification status?
 3. **Phase 3: Notification** We notify the relevant parties. Maybe that's the governance team, maybe that's the policy violators directly.
 
-### Audit (Dry Runs) vs. Enforcement (Full Runs)
+### The action ladder
 
-The Sentinel has two operational modes to ensure you don't accidentally break critical infrastructure:
+Every action a policy can ask for sits on one of four tiers. The tier, not the
+action name, decides how hard it is to actually happen:
 
-1. **Audit Only (Dry Run):** The default mode. The Sentinel discovers resources, evaluates them, logs all violations, and calculates the required actions (`KILL`, `WARN`, `CERTIFY`, `UNCERTIFY`). **It does not execute these actions.** Instead, the dashboard will show a "Review and Act" button next to each violation, allowing you to manually execute the remediation if you choose.
-2. **Execute Enforcement:** This is the live mode. The Sentinel will automatically execute the required actions immediately against any non-compliant resources as soon as the policy evaluates them. This is a destructive operation and carries an "Are you sure?" modal in the UI.
+| Tier | Name | Actions | What it does |
+|------|------|---------|--------------|
+| 0 | Observe | `ALLOW`, `FLAG`, `PENDING_EXCEPTION`, `SKIPPED_ALLOWLIST` | Records a finding. Touches nothing. |
+| 1 | Notify | `ANNOTATE`, `CERTIFY`, `WARN` | Tells someone. Reversible. |
+| 2 | Restrict | `DISABLE`, `QUARANTINE`, `REVOKE_ACCESS`, `THROTTLE`, `UNCERTIFY` | Removes access or capability. Reversible, and every one of these can be undone from the audit trail. |
+| 3 | Destructive | `DELETE`, `TERMINATE` | Irreversible. Deliberately the hardest thing to reach. |
+
+All shipped policies request Tier 1 or Tier 2. Reaching for Tier 3 is a choice
+you have to make explicitly, in a policy you write yourself.
+
+### Scan modes
+
+A run's mode sets the ceiling on what it may do. Anything a policy asks for
+above the ceiling is downgraded to the highest permitted tier and recorded as
+downgraded, so the finding is never silently lost:
+
+1. **`audit`** (the default): everything is downgraded to Tier 0. Findings are
+   recorded and nothing is touched. The dashboard offers a "Review and Act"
+   button so you can execute a remediation yourself.
+2. **`remediate`**: permits up to Tier 2. Reversible actions run automatically;
+   destructive ones are downgraded.
+3. **`enforce`**: permits Tier 3 as well — but only if every gate below also
+   passes.
+
+### The five gates
+
+A Tier 3 action must clear all five. Any one of them failing downgrades the
+action rather than blocking the run:
+
+1. **`policy_declares_destructive`** — the policy must be explicitly annotated
+   as destructive. An action that becomes destructive by accident cannot run.
+2. **`enforcement_enabled`** — the global kill switch, off by default.
+3. **`workspace_allowed`** — the workspace must be named in
+   `DESTRUCTIVE_ACTION_WORKSPACES`, which is empty by default, meaning nowhere.
+4. **`human_approval`** — a run-scoped approval naming the person who gave it.
+   Approvals expire.
+5. **`blast_radius`** — if a single run would destructively act on more
+   resources than the configured limit, every Tier 3 action in the run is
+   refused. This is the guard against a policy edit that unexpectedly matches
+   everything.
+
+Scheduled runs can never construct an approval, because there is nobody present
+to name. So an unattended run in `enforce` mode still fails gate 4: raising a
+schedule's mode widens what it may do as far as Tier 2, and Tier 3 stays out of
+reach from the scheduler by construction.
 
 ### The Allowlist (Exceptions)
 
@@ -32,7 +76,7 @@ Not all rules can apply 100% of the time. The Sentinel includes an **Allowlist**
 
 - **Adding Exceptions:** You can add an exception in the UI for a specific resource (e.g., `cluster-12345`) indicating why it is exempt from standard policies.
 - **Evaluation:** During the discovery phase, the Sentinel pulls all active allowlist exceptions and injects them into the evaluation engine. 
-- **Reprieve:** The Rego policies natively parse these exceptions. If a resource matches an approved exception, the policy overrides its standard destructive action (like `KILL`) and marks the resource as "in policy" due to an approved business exception.
+- **Reprieve:** The Rego policies natively parse these exceptions. If a resource matches an approved exception, the policy drops its requested action to `SKIPPED_ALLOWLIST` and marks the resource as "in policy" due to an approved business exception.
 
 ---
 
@@ -42,26 +86,58 @@ Policies are evaluated using **Open Policy Agent (OPA)** and are written in **Re
 
 You can develop, test, and tweak these policies directly in the app's **Policy Editor** tab, which simulates the evaluation live.
 
-### GitOps & GitHub Integration (Recommended)
+### The policy assistant
 
-To prevent split-brain scenarios and maintain a strict audit trail, the Sentinel supports a fully integrated GitOps workflow. By configuring a GitHub Personal Access Token (PAT), the Policy Editor transforms into a live authoring environment connected directly to your repository:
+Rego is not most people's first language, so the editor has an assistant behind
+it (configurable in **Settings → Agent**, and switched off by disabling it
+there). It drafts Rego from a description, answers questions about the policies
+you already have, writes the notes on a pull request, and keeps a plain-English
+translation of each policy alongside it in the repository.
 
-1. **Live Read:** The Policy Editor fetches the absolute latest `.rego` policies directly from your configured GitHub branch, ensuring you never edit stale code.
-2. **Live Evaluation:** You can author and test policies instantly in the Playground against simulated JSON inputs without saving.
-3. **Propose Changes:** Instead of saving locally, clicking "Create Pull Request" in the UI will automatically create a new branch, commit your changes, and open a Pull Request in GitHub for your team to review.
-4. **Enforcement:** The Databricks App itself continues to enforce the physical policies deployed in its bundle. Once your PR is merged, your standard CI/CD pipeline deploys the updated app to Databricks, and the new policies take effect.
+The translation matters more than it sounds. It is committed in the same pull
+request as the `.rego` file it describes, which means the reviewer who cannot
+read Rego is still reviewing the change rather than approving it on trust.
+
+### Policies live in git, and only in git
+
+Policies are the rules that decide whether something gets touched, so their
+history has to be the reviewable kind. Nothing in the app writes a policy to
+disk. There is no Save button.
+
+`backend/policies/` is a **working copy**, not storage. It is hydrated from your
+GitHub branch at startup and refreshed every few minutes, and anything written
+there by hand is replaced on the next sync. Treating it as durable would be a
+mistake in production anyway: Databricks Apps have ephemeral filesystems, so a
+saved file is gone at the next restart.
+
+Every change, including creating and retiring a policy, goes through a pull
+request:
+
+1. **Read:** the Policy Editor shows the policy as it exists on your configured
+   branch, so you are never editing stale code.
+2. **Evaluate:** the Playground runs your draft against sample JSON input
+   without committing anything.
+3. **Propose:** "Open PR" cuts a branch, commits the `.rego` file together with
+   its regenerated plain-English explanation, and opens a pull request. Drafts
+   live in your browser until then, so a half-finished edit survives a reload
+   without ever reaching the repository.
+4. **Take effect:** once the PR merges, the next sync picks it up. No redeploy.
 
 #### What happens if I don't configure GitHub?
-The GitHub integration is purely optional for local development. If you omit the variables, the app gracefully falls back to reading and writing `.rego` files directly to the local disk (`backend/policies`).
 
-However, **in a deployed Databricks App, you should always configure the GitHub integration.** Databricks Apps run in a containerized environment where the local filesystem is ephemeral. If you omit the GitHub variables in production, any policy changes saved from the UI will be lost the next time the app restarts.
+The Policy Editor becomes read-only and says so. You can still read, evaluate,
+and test policies; you just cannot change them, because there is nowhere safe to
+put the change. The app runs whatever policies shipped in its bundle.
 
 #### What do the actual Sentinel runs use?
-The actual enforcement engine (the background cron scheduler and the "Run Now" button) **always reads strictly from the physical local disk inside the container** (`backend/policies/*`). It **never** pulls live policies from GitHub during a run.
 
-This creates a safe, conflict-free architecture:
-- The **UI** connects to GitHub so users can author and test the absolute bleeding edge.
-- The **Enforcement Engine** reads the local disk to run what has *actually been deployed* via your CI/CD pipeline.
+The working copy — which is to say, the target branch as of the last sync. The
+sync is what makes a merged PR take effect, so review is the gate on what runs,
+not deployment.
+
+If the policies directory is itself a git checkout, as it is when you run
+locally from a clone, the sync leaves it alone rather than overwriting the work
+in your tree.
 
 To enable this, configure the following in your `.env` (for local dev) or `databricks.yml` (for production):
 
@@ -77,7 +153,10 @@ env:
     value: "backend/policies"
 ```
 
-If GitHub integration is not configured, the Policy Editor will gracefully fall back to reading and writing `.rego` files directly to the local disk.
+The token needs read and write access to repository contents and pull requests.
+If your organisation enforces SAML single sign-on, the token must additionally
+be authorised for that organisation, or every request will be refused with a
+403 that has nothing to do with the token's permissions.
 
 ### Supported Resources
 
@@ -204,8 +283,14 @@ env:
 
 The Sentinel doesn't require manual button-clicks. It has a built-in background scheduler that evaluates your workspace on a regular cadence using cron syntax.
 
-**To configure the schedule:**
-Update your `databricks.yml` to inject the environment variables for your deployed app, or set them in your local `.env` file:
+The schedule, its workspace, its environment, and its mode are all editable in
+**Settings → Scanning**, which validates the cron expression and shows the next
+few times it would fire before you save. Changes take effect within a minute;
+the worker re-reads the schedule as it runs, so there is no restart. Leaving the
+schedule blank disables unattended scanning entirely, which is the default.
+
+You can also set the same values as environment variables to establish the
+deployment default, in `databricks.yml` or your local `.env`:
 
 ```yaml
 env:
@@ -216,10 +301,14 @@ env:
   - name: SENTINEL_CRON_ENV
     value: "prod"
   - name: SENTINEL_CRON_MODE
-    value: "audit" # Use "enforce" for automated destructive actions
+    value: "audit" # "remediate" permits reversible actions
 ```
 
 When configured, the FastAPI server spins up a background worker that monitors the time. When the cron schedule hits, it triggers a full workspace evaluation automatically. The results will seamlessly appear in the dashboard run history just like a manual trigger.
+
+Note that `enforce` buys a scheduled run less than it appears to. Unattended
+runs cannot produce a human approval, so they fail the approval gate and top out
+at Tier 2 regardless.
 
 ### Service Principal Permissions
 
@@ -235,7 +324,7 @@ For example, to enforce actions, the Service Principal may need:
 
 ### Implementing Notification Providers
 
-While the destructive actions (`KILL`, `CERTIFY`, `UNCERTIFY`) interact directly with the Databricks SDK, the `WARN` action requires an external notification provider (like Email, Slack, Microsoft Teams, or Jira).
+While the acting tiers (`CERTIFY`, `UNCERTIFY`, `REVOKE_ACCESS`, `TERMINATE` and the rest) interact directly with the Databricks SDK, the `WARN` action requires an external notification provider (like Email, Slack, Microsoft Teams, or Jira).
 
 By default, the Sentinel includes an SMTP Email provider. When a policy evaluates to `WARN`, the Sentinel will look up the resource owner's email address and send them a warning notification.
 

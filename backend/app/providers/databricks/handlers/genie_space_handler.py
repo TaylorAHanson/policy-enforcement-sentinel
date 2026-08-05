@@ -1,36 +1,53 @@
+import asyncio
 import logging
-from typing import List, Dict, Any
-from app.providers.databricks.handlers.base import BaseResourceHandler
+from typing import Any, Dict, List
+
+from app.providers.databricks import destructive, permissions
+from app.providers.databricks.handlers.base import (
+    BaseResourceHandler,
+    SupportsDelete,
+    SupportsRevokeAccess,
+)
 
 logger = logging.getLogger(__name__)
 
-class GenieSpaceResourceHandler(BaseResourceHandler):
+
+class GenieSpaceResourceHandler(BaseResourceHandler, SupportsRevokeAccess, SupportsDelete):
+    """Genie spaces."""
+
+    resource_type = "genie_space"
+
     async def discover(self) -> List[Dict[str, Any]]:
         resources = []
-        try:
-            response = self.workspace_client.genie.list_spaces()
-            spaces = response.spaces if hasattr(response, 'spaces') and response.spaces is not None else []
-            for space in spaces:
-                resources.append({
+        response = self.workspace_client.genie.list_spaces()
+        for space in getattr(response, "spaces", None) or []:
+            tags = getattr(space, "tags", None) or []
+            resources.append(
+                {
                     "id": space.id,
                     "name": space.name,
                     "type": "genie_space",
-                    "owner": getattr(space, 'creator', 'unknown'),
-                    "tags": {t.key: t.value for t in getattr(space, 'tags', [])} if getattr(space, 'tags', None) else {}
-                })
-        except Exception as e:
-            logger.error(f"Failed to discover Genie spaces: {e}")
+                    "owner": getattr(space, "creator", "unknown"),
+                    "description": getattr(space, "description", None),
+                    "tags": {t.key: t.value for t in tags if hasattr(t, "key")},
+                }
+            )
         return resources
-        
-    async def kill(self, resource_id: str) -> bool:
-        try:
-            self.workspace_client.genie.trash_space(space_id=resource_id)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to delete Genie space {resource_id}: {e}")
-            return False
 
-    async def warn(self, resource_id: str, message: str, owner: str = "unknown") -> bool:
-        from app.providers.notifications.email import EmailNotifier
-        logger.info(f"Warning owner of Genie space {resource_id}: {message}")
-        return EmailNotifier().send_warning(owner, resource_id, message)
+    async def revoke_access(self, resource_id: str, *, authorization=None) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            permissions.revoke_permissions, self.workspace_client, "genie_space", resource_id
+        )
+
+    async def restore_access(self, resource_id: str, undo_payload: Dict[str, Any]) -> bool:
+        return await asyncio.to_thread(
+            permissions.restore_permissions, self.workspace_client, undo_payload
+        )
+
+    async def delete(self, resource_id: str, *, authorization) -> bool:
+        return await asyncio.to_thread(
+            destructive.trash_genie_space,
+            self.workspace_client,
+            resource_id,
+            authorization=authorization,
+        )

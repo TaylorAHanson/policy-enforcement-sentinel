@@ -1,293 +1,309 @@
+"""Database session management for Lakebase (PostgreSQL) and SQLite (dev).
+
+Three problems this file exists to solve, all of which showed up as
+intermittent failures during long scans rather than at startup:
+
+1. **Lakebase OAuth tokens are short-lived.** A token baked into the connection
+   URL at startup stops working roughly an hour later, and the failure surfaces
+   as an authentication error on a connection the pool thought was fine. The
+   ``do_connect`` listener fetches a fresh token for every new connection.
+
+2. **Idle connections get dropped.** Lakebase closes connections that sit idle,
+   which a long scan does between its short-lived sessions. ``pool_recycle`` and
+   TCP keepalives mean the pool retires connections before the server does.
+
+3. **``SET search_path`` does not survive a pooled rollback.** Setting it in an
+   ``on_connect`` hook looked correct and worked until a transaction rolled
+   back, at which point queries silently resolved against ``public``. Passing it
+   as a libpq ``options`` connection parameter makes it part of the connection
+   itself.
 """
-Database session management for Lakebase (PostgreSQL) and SQLite (Dev).
-"""
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import NullPool, StaticPool
-from app.core.config import settings
+import logging
+import os
 from typing import Generator, Optional
 from urllib.parse import quote_plus
-import os
-import logging
+
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool, StaticPool
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Lazy initialization - only create engine when needed
 _engine = None
 _SessionLocal = None
-_connection_verified = False
+_lakebase_endpoint: Optional[str] = None
 
 
 def reset_database_connection():
-    """Reset database engine and session factory (useful if credentials change)."""
-    global _engine, _SessionLocal, _connection_verified
+    """Drop the engine and session factory, e.g. after credentials change."""
+    global _engine, _SessionLocal
     logger.warning("Resetting database connection...")
     if _engine:
         _engine.dispose()
     _engine = None
     _SessionLocal = None
-    _connection_verified = False
+
+
+def _ensure_databricks_host_scheme() -> None:
+    env_host = os.environ.get("DATABRICKS_HOST", "")
+    if env_host and not env_host.startswith("http"):
+        os.environ["DATABRICKS_HOST"] = f"https://{env_host}"
+
+
+def get_lakebase_token(endpoint_path: Optional[str] = None) -> Optional[str]:
+    """Fetch a short-lived Postgres credential for Lakebase.
+
+    Extracted so the ``do_connect`` listener can call it per connection rather
+    than relying on whatever token happened to be valid at startup.
+    """
+    endpoint = endpoint_path or _lakebase_endpoint
+    try:
+        from databricks.sdk import WorkspaceClient
+
+        _ensure_databricks_host_scheme()
+        sdk = WorkspaceClient()
+
+        if endpoint:
+            response = sdk.api_client.do(
+                "POST", "/api/2.0/postgres/credentials", body={"endpoint": endpoint}
+            )
+            token = response.get("token")
+            if token:
+                return token
+            logger.error("Lakebase credentials call succeeded but returned no token.")
+
+        # Databricks Apps inject PG* variables and expect the app's own OAuth
+        # token to be used as the password.
+        auth_headers = sdk.config.authenticate()
+        if auth_headers and "Authorization" in auth_headers:
+            return auth_headers["Authorization"].replace("Bearer ", "")
+        if getattr(sdk.config, "token", None):
+            return sdk.config.token
+    except Exception as e:
+        logger.error("Failed to fetch Lakebase token: %s: %s", type(e).__name__, e)
+
+    return None
 
 
 def get_database_url() -> str:
-    """
-    Get database URL, constructing it if needed.
-    
-    For Lakebase (Databricks PostgreSQL), we use native postgres roles
-    with password from Databricks Secret Scope.
-    """
-    # If a full DATABASE_URL is provided, use it directly
-    # WARNING: This bypasses all our logic - log it prominently
+    """Resolve the connection URL, falling back to SQLite when Lakebase isn't configured."""
+    global _lakebase_endpoint
+
     if settings.DATABASE_URL:
-        logger.warning(f"DATABASE_URL env var is set - using it directly!")
-        logger.warning(f"First 50 chars: {settings.DATABASE_URL[:50]}...")
+        logger.warning("DATABASE_URL is set explicitly; using it as-is.")
         return settings.DATABASE_URL
-    
-    # Check for Postgres/Lakebase config
-    # 1. First, check if Databricks Apps auto-injected PG variables
+
     pg_host = os.environ.get("PGHOST")
     pg_user = os.environ.get("PGUSER")
     pg_name = os.environ.get("PGDATABASE")
     pg_port = os.environ.get("PGPORT", "5432")
-    
+
     host = pg_host or settings.DATABASE_HOST
-    user = pg_user or settings.DATABASE_USER or "atlas_app"  # Native Postgres role
+    user = pg_user or settings.DATABASE_USER or "atlas_app"
     name = pg_name or settings.DATABASE_NAME
     port = pg_port or settings.DATABASE_PORT
     password = settings.DATABASE_PASSWORD
-    
-    # DEBUG: Print what we're using
-    logger.debug(f"=== DATABASE SETTINGS DEBUG ===")
-    logger.debug(f"FORCING DB USER = {user}")
-    logger.debug(f"HOST = {host}")
-    logger.debug(f"NAME = {name}")
-    
     db_id = None
+
     if host and user and name:
         if pg_host:
-            logger.info("Using Databricks Apps auto-injected PG variables for Lakebase connection.")
-            try:
-                from databricks.sdk import WorkspaceClient
-                
-                # Ensure DATABRICKS_HOST has https:// prefix if running remotely
-                env_host = os.environ.get("DATABRICKS_HOST", "")
-                if env_host and not env_host.startswith("http"):
-                    os.environ["DATABRICKS_HOST"] = f"https://{env_host}"
-                    
-                sdk = WorkspaceClient()
-                auth_headers = sdk.config.authenticate()
-                if auth_headers and "Authorization" in auth_headers:
-                    password = auth_headers["Authorization"].replace("Bearer ", "")
-                elif hasattr(sdk.config, "token") and sdk.config.token:
-                    password = sdk.config.token
-                
-                if password:
-                    logger.info("Successfully acquired Databricks OAuth token for Lakebase password.")
-                else:
-                    logger.error("Failed to acquire OAuth token from WorkspaceClient.")
-            except Exception as e:
-                logger.error(f"Failed to fetch Databricks OAuth token: {type(e).__name__}: {e}")
+            logger.info("Using Databricks Apps injected PG variables for Lakebase.")
+            password = get_lakebase_token()
         elif settings.DATABASE_PASSWORD:
-            logger.info("Using injected DATABASE_PASSWORD from environment (Resource Binding).")
+            logger.info("Using injected DATABASE_PASSWORD (resource binding).")
             password = settings.DATABASE_PASSWORD
-            # When a resource is bound, Databricks injects the specific DATABASE_USER and DATABASE_NAME too
             user = settings.DATABASE_USER
             name = settings.DATABASE_NAME
         else:
-            # Detect if running in Databricks (Apps, Notebooks, or Jobs)
-            is_databricks = (
-                os.environ.get("DATABRICKS_RUNTIME_VERSION") or 
-                os.environ.get("DATABRICKS_HOST") or
-                os.environ.get("DATABRICKS_INSTANCE_POOL_ID") or
-                os.path.exists("/databricks") or  # Databricks Apps run in /databricks
-                "database.cloud.databricks.com" in host  # Lakebase host indicates Databricks
+            is_databricks = bool(
+                os.environ.get("DATABRICKS_RUNTIME_VERSION")
+                or os.environ.get("DATABRICKS_HOST")
+                or os.environ.get("DATABRICKS_INSTANCE_POOL_ID")
+                or os.path.exists("/databricks")
+                or "database.cloud.databricks.com" in (host or "")
             )
-            
-            # Method 1: Fetch short-lived OAuth token via Databricks API for Postgres
             if is_databricks:
-                try:
-                    from databricks.sdk import WorkspaceClient
-                    
-                    # Ensure DATABRICKS_HOST has https:// prefix
-                    env_host = os.environ.get("DATABRICKS_HOST", "")
-                    if env_host and not env_host.startswith("http"):
-                        os.environ["DATABRICKS_HOST"] = f"https://{env_host}"
-                        
-                    sdk = WorkspaceClient()
-                    
-                    # The user is the Databricks Service Principal / User running the app
-                    # This overrides the default 'atlas_app' native role
-                    user = sdk.current_user.me().user_name
-                    logger.info(f"Using Databricks Workspace user for Lakebase: {user}")
-                    
-                    # Fetch all autoscaling projects
-                    projects_res = sdk.api_client.do("GET", "/api/2.0/postgres/projects")
-                    projects = projects_res.get("projects", [])
-                    
-                    target_project_name = settings.DATABASE_INSTANCE_NAME
-                    matched_project = None
-                    
-                    if target_project_name:
-                        matched_project = next((p for p in projects if p.get("name", "").endswith(target_project_name)), None)
-                    elif projects:
-                        # Auto-discover if only one project or just grab the first one
-                        matched_project = projects[0]
-                        target_project_name = matched_project.get("name")
-                        logger.warning(f"DATABASE_INSTANCE_NAME not set in environment. Auto-discovered project: {target_project_name}")
-                    
-                    if matched_project and target_project_name:
-                        # Construct the path to the primary endpoint on the production branch
-                        endpoint_path = f"projects/{target_project_name}/branches/production/endpoints/primary"
-                        logger.info(f"Found matching Lakebase project. Requesting credentials for: {endpoint_path}")
-                        
-                        # Fetch databases in this branch to use the database ID as dbname
-                        try:
-                            db_res = sdk.api_client.do("GET", f"/api/2.0/postgres/projects/{target_project_name}/branches/production/databases")
-                            databases = db_res.get("databases", [])
-                            db_id = None
-                            if databases:
-                                # Extract the actual database ID (e.g. db-xxxxxxxx)
-                                # Name format is usually "projects/.../databases/db-xxxx"
-                                db_name_full = databases[0].get("name", "")
-                                db_id = db_name_full.split("/")[-1]
-                                logger.info(f"Auto-discovered Database ID: {db_id}")
-                            else:
-                                logger.warning("Could not find any databases in the production branch!")
-                        except Exception as db_e:
-                            logger.warning(f"Failed to auto-discover database ID, falling back to name. Error: {db_e}")
-                            db_id = None
-                        
-                        # Request the token
-                        res = sdk.api_client.do(
-                            "POST", 
-                            "/api/2.0/postgres/credentials",
-                            body={"endpoint": endpoint_path}
-                        )
-                        
-                        password = res.get("token")
-                        if password:
-                            logger.info("Successfully acquired short-lived OAuth token for Lakebase.")
-                        else:
-                            logger.error("API returned success but no token was found in the response.")
-                    else:
-                        logger.error(f"Could not find any Lakebase projects to connect to.")
-                        
-                except Exception as e:
-                    logger.error(f"Failed to fetch Lakebase OAuth credentials: {type(e).__name__}: {e}")
-                
-        # Log final configuration
-        logger.info(f"Final DB config - Host: {host}, User: {user}, Password set: {password is not None}")
-        
-        # If we have all required params, build the PostgreSQL URL
+                user, db_id, password = _resolve_lakebase_project(user)
+
         if password:
-            # URL-encode user and password to handle special characters like '@'
             safe_user = quote_plus(user)
             safe_password = quote_plus(password)
-            
-            # The database name MUST be the database_id for autoscaling Lakebase!
-            # If the API returned it above, use it; otherwise fallback to DATABASE_NAME
-            db_name_to_use = db_id if db_id else name
-            
-            url = f"postgresql://{safe_user}:{safe_password}@{host}:{port}/{db_name_to_use}?sslmode=require"
-            
-            # CRITICAL: Log the final URL structure (without password) for debugging
-            safe_url = f"postgresql://{safe_user}:***@{host}:{port}/{db_name_to_use}?sslmode=require"
-            logger.debug(f"FINAL DATABASE URL (safe): {safe_url}")
-            logger.info(f"=== LAKEBASE CONNECTION ===")
-            logger.info(f"  Host: {host}")
-            logger.info(f"  User: {user} (encoded: {safe_user})")
-            logger.info(f"  Database: {db_name_to_use}")
-            logger.info(f"  Password length: {len(password)}")
-            logger.info(f"  Safe URL: {safe_url}")
-            return url
-        else:
-            logger.warning("No valid password/token found for Lakebase. Falling back to SQLite.")
-            
-    # Fallback to SQLite
+            # Autoscaling Lakebase addresses the database by its ID, not its name.
+            db_name_to_use = db_id or name
+
+            logger.info(
+                "Lakebase connection: host=%s user=%s database=%s", host, user, db_name_to_use
+            )
+            return (
+                f"postgresql://{safe_user}:{safe_password}@{host}:{port}/"
+                f"{db_name_to_use}?sslmode=require"
+            )
+
+        logger.warning("No Lakebase credential available. Falling back to SQLite.")
+
+    return _sqlite_url()
+
+
+def _resolve_lakebase_project(user: str):
+    """Discover the Lakebase project, database ID, and an initial token."""
+    global _lakebase_endpoint
+
+    try:
+        from databricks.sdk import WorkspaceClient
+
+        _ensure_databricks_host_scheme()
+        sdk = WorkspaceClient()
+
+        user = sdk.current_user.me().user_name
+        logger.info("Using Databricks workspace user for Lakebase: %s", user)
+
+        projects = sdk.api_client.do("GET", "/api/2.0/postgres/projects").get("projects", [])
+        target = settings.DATABASE_INSTANCE_NAME
+        matched = None
+
+        if target:
+            matched = next((p for p in projects if p.get("name", "").endswith(target)), None)
+        elif projects:
+            matched = projects[0]
+            target = matched.get("name")
+            logger.warning(
+                "DATABASE_INSTANCE_NAME not set; auto-discovered project %s.", target
+            )
+
+        if not (matched and target):
+            logger.error("No Lakebase project found to connect to.")
+            return user, None, None
+
+        _lakebase_endpoint = f"projects/{target}/branches/production/endpoints/primary"
+
+        db_id = None
+        try:
+            databases = sdk.api_client.do(
+                "GET", f"/api/2.0/postgres/projects/{target}/branches/production/databases"
+            ).get("databases", [])
+            if databases:
+                db_id = databases[0].get("name", "").split("/")[-1]
+                logger.info("Auto-discovered Lakebase database ID: %s", db_id)
+        except Exception as e:
+            logger.warning("Could not auto-discover database ID: %s", e)
+
+        return user, db_id, get_lakebase_token(_lakebase_endpoint)
+    except Exception as e:
+        logger.error("Failed to resolve Lakebase project: %s: %s", type(e).__name__, e)
+        return user, None, None
+
+
+def _sqlite_url() -> str:
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    
-    # If running in Databricks, try to use a persistent path
+
     if os.environ.get("DATABRICKS_RUNTIME_VERSION") or os.environ.get("DATABRICKS_HOST"):
-        persistent_dir = "/tmp/sentinel_hub_data"  # Default fallback
-        
-        # Try to find the user's workspace path
-        for env_var in ["USER", "DATABRICKS_USER", "OWNER"]:
+        persistent_dir = "/tmp/sentinel_hub_data"
+        for env_var in ("USER", "DATABRICKS_USER", "OWNER"):
             db_user = os.environ.get(env_var)
             if db_user:
                 persistent_dir = f"/Workspace/Users/{db_user}/sentinel_hub_data"
                 break
-        
         try:
             os.makedirs(persistent_dir, exist_ok=True)
             db_path = os.path.join(persistent_dir, "sentinel.db")
-            logger.info(f"Using persistent SQLite database at: {db_path}")
+            logger.info("Using persistent SQLite database at %s", db_path)
             return f"sqlite:///{db_path}"
         except Exception as e:
-            logger.warning(f"Could not create persistent directory {persistent_dir}: {e}. Falling back to local.")
-            
-    db_path = os.path.join(base_dir, "sentinel.db")
-    return f"sqlite:///{db_path}"
+            logger.warning("Could not create %s (%s); using the local file.", persistent_dir, e)
+
+    return f"sqlite:///{os.path.join(base_dir, 'sentinel.db')}"
 
 
 def get_engine():
-    """Get or create database engine (lazy initialization)."""
+    """Get or create the engine (lazily, so importing this module is cheap)."""
     global _engine
-    if _engine is None:
-        database_url = get_database_url()
-        
-        if database_url.startswith("sqlite"):
-            is_memory = ":memory:" in database_url
-            _engine = create_engine(
-                database_url,
-                connect_args={"check_same_thread": False},
-                poolclass=StaticPool if is_memory else NullPool,
-                echo=False
-            )
+    if _engine is not None:
+        return _engine
+
+    database_url = get_database_url()
+
+    if database_url.startswith("sqlite"):
+        is_memory = ":memory:" in database_url
+        _engine = create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool if is_memory else NullPool,
+            echo=False,
+        )
+        return _engine
+
+    schema = settings.DB_SCHEMA
+    _engine = create_engine(
+        database_url,
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,
+        # Retire connections before Lakebase drops them for idleness.
+        pool_recycle=settings.DB_POOL_RECYCLE_SECONDS,
+        connect_args={
+            # Part of the connection itself, so a rolled-back transaction can't
+            # silently leave queries resolving against `public`.
+            "options": f"-csearch_path={schema},public",
+            # Notice a half-open connection in ~40s instead of hanging on it.
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
+            "connect_timeout": 10,
+        },
+        echo=False,
+    )
+
+    @event.listens_for(_engine, "do_connect")
+    def provide_fresh_token(dialect, conn_rec, cargs, cparams):
+        """Swap in a freshly minted token for each new physical connection.
+
+        Without this, the pool hands out connections authenticated with a token
+        captured at startup, and everything works until it abruptly doesn't.
+        """
+        if not _lakebase_endpoint and not os.environ.get("PGHOST"):
+            return None
+
+        token = get_lakebase_token()
+        if token:
+            cparams["password"] = token
         else:
-            _engine = create_engine(
-                database_url,
-                pool_size=10,
-                max_overflow=20,
-                pool_pre_ping=True,  # checks connection is alive before using it
-                echo=False,
-            )
-            
-            @event.listens_for(_engine, "connect")
-            def on_connect(dbapi_connection, connection_record):
-                cursor = dbapi_connection.cursor()
-                try:
-                    # By default in PG 15+, public schema doesn't allow CREATE
-                    # Create our own schema and use it instead
-                    schema_name = "policy_enforcement_sentinel"
-                    cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}";')
-                    cursor.execute(f'SET search_path TO "{schema_name}";')
-                except Exception as e:
-                    logger.warning(f"Failed to setup schema or search_path: {e}")
-                finally:
-                    cursor.close()
-                    
+            logger.warning("Could not refresh Lakebase token; using the existing credential.")
+        return None
+
+    @event.listens_for(_engine, "connect")
+    def ensure_schema(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}";')
+            dbapi_connection.commit()
+        except Exception as e:
+            # Not fatal: the schema usually already exists and the app may be
+            # connecting as a role without CREATE.
+            logger.warning("Could not ensure schema %s exists: %s", schema, e)
+        finally:
+            cursor.close()
+
+    logger.info(
+        "Postgres engine configured (schema=%s, pool_recycle=%ss).",
+        schema,
+        settings.DB_POOL_RECYCLE_SECONDS,
+    )
     return _engine
 
 
 def get_session_local():
-    """Get or create session factory (lazy initialization)."""
     global _SessionLocal
     if _SessionLocal is None:
-        _SessionLocal = sessionmaker(
-            autocommit=False, 
-            autoflush=False, 
-            bind=get_engine()
-        )
+        _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=get_engine())
     return _SessionLocal
 
 
 def get_db() -> Generator[Session, None, None]:
-    """
-    Dependency for getting database session.
-    Use this in FastAPI route dependencies.
-    """
-    SessionLocal = get_session_local()
-    db = SessionLocal()
+    """FastAPI dependency."""
+    db = get_session_local()()
     try:
         yield db
     finally:
@@ -295,9 +311,10 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def get_lakebase_session() -> Session:
+    """Session for workers and background tasks. The caller must close it.
+
+    Long-running work should take one of these, use it, and close it promptly
+    rather than holding it open across the whole task — see the note in
+    backend/AGENTS.md about short-lived sessions.
     """
-    Get a database session for use in workers/tasks.
-    Caller is responsible for closing the session.
-    """
-    SessionLocal = get_session_local()
-    return SessionLocal()
+    return get_session_local()()

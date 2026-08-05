@@ -13,3 +13,11 @@ tenacity==9.1.4
 PyYAML==6.0.3
 mcp==1.20.0
 croniter==6.2.2
+# Serialising a scan's findings (tens of thousands of rows) with the stdlib json
+# module blocks the event loop long enough to matter.
+orjson==3.11.4
+
+# Testing
+pytest==8.4.2
+pytest-asyncio==1.3.0
+pytest-cov==7.0.0

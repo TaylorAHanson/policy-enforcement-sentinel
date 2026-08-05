@@ -1,465 +1,449 @@
-import { useState, useEffect, useRef } from 'react';
-import Editor, { DiffEditor } from '@monaco-editor/react';
-import { Save, Play, Plus, Search, ChevronDown, Check, X, AlertTriangle, RefreshCw, GitPullRequest, ExternalLink } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from "react";
+import Editor from "@monaco-editor/react";
+import {
+  AlertTriangle,
+  Check,
+  ExternalLink,
+  FileClock,
+  GitPullRequest,
+  Play,
+} from "lucide-react";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card, CardHeader, CardTitle } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Alert, ErrorState, Skeleton } from "../components/ui/feedback";
+import { Tabs } from "../components/ui/tabs";
+import { AgentChatPanel } from "../components/agent/AgentChatPanel";
+import { PolicyAuthorPanel } from "../components/agent/PolicyAuthorPanel";
+import { PolicyEnglishPanel } from "../components/policy/PolicyEnglishPanel";
+import { PolicyHistoryPanel } from "../components/policy/PolicyHistoryPanel";
+import { PolicyMetadataPanel } from "../components/policy/PolicyMetadataPanel";
+import { PolicySyncBanner } from "../components/policy/PolicySyncBanner";
+import { TierBadge } from "../components/safety/TierBadge";
+import { useAutoSize } from "../lib/useAutoSize";
+import api from "../services/api";
+import { usePolicyStore } from "../store/policyStore";
+import { toast } from "../store/toastStore";
+
+const MONACO_OPTIONS = {
+  minimap: { enabled: false },
+  fontSize: 13,
+  lineNumbers: "on" as const,
+  scrollBeyondLastLine: false,
+  automaticLayout: true,
+  tabSize: 2,
+  renderWhitespace: "selection" as const,
+};
+
+const SAMPLE_INPUT = JSON.stringify(
+  {
+    workspace: { name: "ws-enterprise-prod", type: "enterprise", environment: "prod" },
+    resource: {
+      id: "example-cluster",
+      type: "cluster",
+      cluster_type: "interactive",
+      access_mode: "shared",
+      tags: {},
+    },
+    allowlist_records: [],
+    request_time: 0,
+  },
+  null,
+  2,
+);
+
+type PanelTab =
+  | "metadata"
+  | "history"
+  | "english"
+  | "playground"
+  | "author"
+  | "ask";
+
+/**
+ * Its own component so the auto-sizing runs when the tab is actually opened.
+ *
+ * Measured from the parent, the textarea did not exist yet on the render that
+ * set up the layout effect, and nothing it depended on changed when the tab
+ * later mounted it — so the height was never applied and the input sat at the
+ * browser's two-row default while the result took the rest of the pane.
+ */
+function PlaygroundPanel({
+  input,
+  onInputChange,
+  output,
+  evaluating,
+  disabled,
+  onEvaluate,
+}: {
+  input: string;
+  onInputChange: (value: string) => void;
+  output: string;
+  evaluating: boolean;
+  disabled: boolean;
+  onEvaluate: () => void;
+}) {
+  // The input grows with its payload and stops at half the pane, so the result
+  // always keeps at least half the height.
+  const paneRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useAutoSize(inputRef, input, { containerRef: paneRef });
+
+  return (
+    <div ref={paneRef} className="flex h-full flex-col gap-2 p-3">
+      <div className="flex items-center justify-between">
+        <p className="text-2xs text-content-subtle">
+          Evaluates the editor's contents, not the committed file.
+        </p>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={onEvaluate}
+          loading={evaluating}
+          disabled={disabled}
+        >
+          <Play />
+          Evaluate
+        </Button>
+      </div>
+
+      <label className="text-2xs uppercase tracking-wider text-content-subtle">
+        Input
+      </label>
+      <textarea
+        ref={inputRef}
+        value={input}
+        onChange={(e) => onInputChange(e.target.value)}
+        spellCheck={false}
+        className="w-full shrink-0 resize-none rounded-md border border-border-strong bg-surface-raised px-2.5 py-2 font-mono text-2xs leading-relaxed text-content"
+      />
+
+      <label className="text-2xs uppercase tracking-wider text-content-subtle">
+        Result
+      </label>
+      <pre className="min-h-0 flex-1 overflow-auto rounded-md border border-border bg-canvas px-2.5 py-2 font-mono text-2xs leading-relaxed text-content-muted">
+        {output}
+      </pre>
+    </div>
+  );
+}
 
 export default function PolicyEditor() {
-  const [policies, setPolicies] = useState<string[]>([]);
-  const [selectedPolicy, setSelectedPolicy] = useState<string>('');
-  const [policyContent, setPolicyContent] = useState<string>('');
-  const [originalContent, setOriginalContent] = useState<string>('');
-  const [showDiffModal, setShowDiffModal] = useState(false);
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [githubEnabled, setGithubEnabled] = useState(false);
-  const [targetBranch, setTargetBranch] = useState('main');
-  const [prUrl, setPrUrl] = useState<string | null>(null);
-  
-  const [inputJson, setInputJson] = useState<string>('{\n  "workspace": {\n    "name": "ws-enterprise-prod",\n    "type": "enterprise",\n    "environment": "prod"\n  },\n  "resource": {\n    "id": "example-cluster",\n    "type": "cluster",\n    "attributes": {}\n  }\n}');
-  const [outputJson, setOutputJson] = useState<string>('{}');
-  
+  const store = usePolicyStore();
+  const [panel, setPanel] = useState<PanelTab>("metadata");
+  const [filter, setFilter] = useState("");
+  const [inputJson, setInputJson] = useState(SAMPLE_INPUT);
+  const [outputJson, setOutputJson] = useState("{}");
   const [evaluating, setEvaluating] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [prUrl, setPrUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchConfig();
-    fetchPolicies();
+    void store.loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && showDiffModal) {
-        setShowDiffModal(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showDiffModal]);
-
-  const fetchConfig = async () => {
-    try {
-      const res = await fetch('/api/v1/policies/config');
-      const data = await res.json();
-      setGithubEnabled(data.github_enabled);
-      setTargetBranch(data.target_branch || 'main');
-    } catch (e) {
-      console.error("Failed to fetch config", e);
+    if (!store.selectedName && store.files.length) {
+      void store.select(store.files[0]);
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.files, store.selectedName]);
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  const visibleFiles = useMemo(
+    () => store.files.filter((f) => f.toLowerCase().includes(filter.toLowerCase())),
+    [store.files, filter],
+  );
 
-  const filteredPolicies = policies.filter(p => p.toLowerCase().includes(searchQuery.toLowerCase()));
+  const dirty = store.isDirty();
+  const maxTier = store.metadata?.max_tier ?? 0;
 
-  const fetchPolicies = async () => {
-    try {
-      const res = await fetch('/api/v1/policies');
-      const data = await res.json();
-      setPolicies(data);
-      if (data.length > 0 && !selectedPolicy) {
-        loadPolicy(data[0]);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const getDefaultInputForPolicy = (policyName: string) => {
-    const baseWorkspace = {
-      "name": "ws-enterprise-prod",
-      "type": "enterprise",
-      "environment": "prod"
-    };
-    
-    let resourceType = "unknown";
-    let attributes: any = {};
-    
-    if (policyName.includes("cluster")) {
-      resourceType = "cluster";
-      attributes = {
-        "node_type_id": "i3.xlarge",
-        "custom_tags": {}
-      };
-    } else if (policyName.includes("job")) {
-      resourceType = "job";
-      attributes = {
-        "creator": "user@example.com",
-        "idle_days": 65,
-        "settings": {
-          "email_notifications": {}
-        }
-      };
-    } else if (policyName.includes("sql_warehouse") || policyName.includes("warehouse")) {
-      resourceType = "sql_warehouse";
-      attributes = {
-        "channel": "preview",
-        "cluster_size": "Large"
-      };
-    } else if (policyName.includes("model_serving")) {
-      resourceType = "model_serving_endpoint";
-      attributes = {
-        "name": "my-endpoint",
-        "custom_tags": {}
-      };
-    } else if (policyName.includes("spark_declarative_pipelines") || policyName.includes("pipeline") || policyName.includes("dlt")) {
-      resourceType = "pipeline";
-      attributes = {
-        "serverless": false,
-        "continuous": false
-      };
-    } else if (policyName.includes("service_principal")) {
-      resourceType = "service_principal";
-      attributes = {
-        "display_name": "example-sp",
-        "active": true
-      };
-    }
-    
-    return JSON.stringify({
-      workspace: baseWorkspace,
-      resource: {
-        id: `example-${resourceType.replace(/_/g, '-')}`,
-        type: resourceType,
-        ...attributes
-      },
-      allowlist_records: [],
-      request_time: new Date().toISOString()
-    }, null, 2);
-  };
-
-  const loadPolicy = async (name: string) => {
-    try {
-      const res = await fetch(`/api/v1/policies/${name}`);
-      const data = await res.json();
-      setSelectedPolicy(name);
-      setPolicyContent(data.content);
-      setOriginalContent(data.content);
-      setValidationErrors([]);
-      setPrUrl(null);
-      setInputJson(getDefaultInputForPolicy(name));
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleValidateAndDiff = async () => {
-    if (!selectedPolicy) return;
-    setSaving(true);
-    setValidationErrors([]);
-    setPrUrl(null);
-    try {
-      const res = await fetch('/api/v1/policies/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ policy_name: selectedPolicy, content: policyContent })
-      });
-      const data = await res.json();
-      
-      if (!data.valid) {
-        setValidationErrors(data.errors || ['Validation failed']);
-        setOutputJson(JSON.stringify({ 
-          status: "Validation Failed", 
-          errors: data.errors 
-        }, null, 2));
-        return;
-      }
-      
-      // If validation succeeds, clear output pane of any previous validation errors
-      if (validationErrors.length > 0) {
-        setOutputJson('{}');
-      }
-      
-      if (policyContent !== originalContent) {
-        setShowDiffModal(true);
-      } else {
-        // No changes, just perform a silent save to give feedback
-        await executeSave();
-      }
-    } catch (e) {
-      console.error(e);
-      setValidationErrors(['Error connecting to validation service']);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const executeSave = async () => {
-    if (!selectedPolicy) return;
-    setSaving(true);
-    try {
-      const endpoint = githubEnabled ? `/api/v1/policies/${selectedPolicy}/pr` : `/api/v1/policies/${selectedPolicy}`;
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: policyContent })
-      });
-      
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.detail || "Failed to save or create PR");
-      }
-      
-      setOriginalContent(policyContent);
-      
-      if (githubEnabled && data.pr_url) {
-        setPrUrl(data.pr_url);
-        // We do NOT close the modal automatically here so they can see the success link.
-      } else {
-        setShowDiffModal(false);
-      }
-      
-      await fetchPolicies();
-    } catch (e: any) {
-      console.error(e);
-      alert(e.message || "An error occurred while saving.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleEvaluate = async () => {
+  const evaluate = async () => {
+    if (!store.selectedName) return;
     setEvaluating(true);
     try {
-      const parsedInput = JSON.parse(inputJson);
-      const queryName = selectedPolicy.replace('.rego', '');
-      
-      const res = await fetch('/api/v1/policies/evaluate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          policy_name: selectedPolicy,
-          content: policyContent,
-          query: `data.databricks.governance.${queryName}`,
-          input_data: parsedInput
-        })
+      const parsed = JSON.parse(inputJson);
+      const pkg = store.metadata?.package ?? store.selectedName.replace(/\.rego$/, "");
+      const result = await api.policies.evaluate({
+        policy_name: store.selectedName,
+        content: store.content,
+        query: `data.databricks.governance.${pkg}`,
+        input_data: parsed,
       });
-      
-      const data = await res.json();
-      setOutputJson(JSON.stringify(data, null, 2));
-    } catch (e: any) {
-      setOutputJson(JSON.stringify({ error: e.message || 'Invalid JSON Input' }, null, 2));
+      setOutputJson(
+        JSON.stringify(result.success ? result.result : { error: result.error }, null, 2),
+      );
+    } catch (e) {
+      const message = e instanceof SyntaxError ? "Input is not valid JSON." : String(e);
+      setOutputJson(JSON.stringify({ error: message }, null, 2));
+      toast.error("Could not evaluate", message);
     } finally {
       setEvaluating(false);
     }
   };
 
-  const handleNew = () => {
-    const name = prompt('Enter new policy name (e.g. my_policy.rego):');
-    if (name) {
-      setSelectedPolicy(name.endsWith('.rego') ? name : `${name}.rego`);
-      setPolicyContent('package databricks.governance.' + name.replace('.rego', '') + '\n\n# Your policy logic here\n');
-    }
+  const openPr = async () => {
+    const url = await store.createPr();
+    if (url) setPrUrl(url);
   };
 
-  return (
-    <div className="flex flex-col h-[calc(100vh-4rem)]">
-      <div className="flex justify-between items-center mb-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-100">Policy Editor & Playground</h1>
-          <p className="text-slate-400 mt-1 text-sm">Author Rego policies and test them instantly against simulated inputs.</p>
-        </div>
-      </div>
+  if (store.error && !store.files.length) {
+    return <ErrorState message={store.error} onRetry={() => void store.loadAll()} />;
+  }
 
-      <div className="flex flex-1 gap-4 overflow-hidden">
-        {/* Left pane: File explorer & Policy Editor */}
-        <div className="w-1/2 flex flex-col bg-[#11151c] rounded-xl shadow-lg border border-slate-800 overflow-hidden">
-          <div className="flex items-center justify-between p-3 border-b border-slate-800 bg-[#161b22]">
-            <div className="flex items-center gap-3">
-              <div className="relative w-64" ref={dropdownRef}>
-                <div 
-                  className={`flex items-center justify-between w-full border rounded-[4px] bg-[#0b0f15] text-slate-200 px-3 py-1.5 text-[13px] cursor-pointer transition-colors ${isDropdownOpen ? 'border-[#8acaff]' : 'border-slate-700 hover:border-slate-600'}`}
-                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                >
-                  <span className="truncate mr-2 font-medium">{selectedPolicy || "Select a policy..."}</span>
-                  <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" />
-                </div>
-                
-                {isDropdownOpen && (
-                  <div className="absolute top-full left-0 mt-1 w-80 bg-[#11151c] border border-slate-700 rounded-[4px] shadow-xl z-50 overflow-hidden">
-                    <div className="p-2 border-b border-slate-800">
-                      <div className="relative">
-                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-500" />
-                        <input 
-                          type="text" 
-                          autoFocus
-                          className="w-full bg-[#0b0f15] border border-slate-700 rounded-[4px] pl-8 pr-3 py-1.5 text-[13px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-[#8acaff] transition-colors"
-                          placeholder="Search policies..."
-                          value={searchQuery}
-                          onChange={e => setSearchQuery(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <div className="max-h-60 overflow-y-auto p-1">
-                      {filteredPolicies.length === 0 ? (
-                        <div className="px-3 py-4 text-center text-slate-500 text-[13px]">No policies found</div>
-                      ) : (
-                        filteredPolicies.map(p => (
-                          <div 
-                            key={p}
-                            className={`flex items-center justify-between px-3 py-2 text-[13px] rounded-[4px] cursor-pointer ${selectedPolicy === p ? 'bg-[#8acaff14] text-[#8acaff] font-medium' : 'text-slate-300 hover:bg-[#1b232d] hover:text-slate-200'}`}
-                            onClick={() => {
-                              loadPolicy(p);
-                              setIsDropdownOpen(false);
-                              setSearchQuery('');
-                            }}
-                          >
-                            <span className="truncate">{p}</span>
-                            {selectedPolicy === p && <Check className="w-3.5 h-3.5 shrink-0" />}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <button onClick={handleNew} className="flex items-center gap-1 p-1.5 px-2 text-[13px] font-medium text-slate-400 hover:text-[#8acaff] hover:bg-[#8acaff14] rounded-[4px] transition-colors border border-transparent hover:border-[#8acaff]/30" title="New Policy">
-                <Plus className="w-4 h-4" /> New
+  return (
+    <div className="mx-auto flex h-full max-w-[1700px] flex-col gap-4">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold text-content">Policy Editor</h1>
+          <p className="mt-1 text-xs text-content-muted">
+            Policies live in git and change by pull request. Everything ships at
+            Tier 1 — escalating a rule is a deliberate edit.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {dirty && (
+            <span className="inline-flex items-center gap-1.5 text-2xs text-content-subtle">
+              <FileClock className="size-3.5" />
+              Unsubmitted draft, saved in this browser
+              <button
+                type="button"
+                onClick={() => store.discardDraft()}
+                className="underline underline-offset-2 hover:text-content"
+              >
+                Discard
               </button>
-            </div>
-            <button 
-              onClick={handleValidateAndDiff} 
-              disabled={saving || !selectedPolicy}
-              className="btn-primary gap-1.5"
+            </span>
+          )}
+          <Button
+            variant="secondary"
+            onClick={() => void store.validate()}
+            disabled={!store.selectedName}
+          >
+            <Check />
+            Validate
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => void openPr()}
+            loading={store.submitting}
+            disabled={!dirty || !store.githubEnabled}
+          >
+            <GitPullRequest />
+            Open PR to {store.targetBranch}
+          </Button>
+        </div>
+      </header>
+
+      {!store.githubEnabled && (
+        <Alert tone="warning" title="Policies are read-only here">
+          Policies are stored in git and changed by pull request, and GitHub is
+          not configured for this deployment. Set <code>GITHUB_TOKEN</code> and{" "}
+          <code>GITHUB_REPO</code> to propose changes from the editor.
+        </Alert>
+      )}
+
+      <PolicySyncBanner
+        sync={store.sync}
+        onRefresh={() => void store.refreshFromGit()}
+      />
+
+      {prUrl && (
+        <Alert
+          tone="success"
+          title="Pull request opened"
+          action={
+            <a
+              href={prUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs underline underline-offset-4"
             >
-              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : 
-               (githubEnabled ? <GitPullRequest className="w-4 h-4" /> : <Save className="w-4 h-4" />)} 
-              {githubEnabled ? 'Propose Change' : 'Save'}
-            </button>
-          </div>
-          <div className="flex-1 bg-[#1e1e1e]">
-            <Editor
-              height="100%"
-              defaultLanguage="ruby" // Monaco doesn't have native Rego syntax highlighting, ruby is a decent fallback for styling
-              value={policyContent}
-              onChange={(v) => setPolicyContent(v || '')}
-              theme="vs-dark"
-              options={{ minimap: { enabled: false }, fontSize: 14, padding: { top: 16 } }}
+              Open <ExternalLink className="size-3" />
+            </a>
+          }
+        >
+          Your draft is now a reviewable change. It takes effect once the pull
+          request merges and the working copy syncs.
+        </Alert>
+      )}
+
+      {store.validation && !store.validation.valid && (
+        <Alert tone="danger" title="This policy does not compile">
+          <ul className="list-disc space-y-0.5 pl-4">
+            {store.validation.errors.map((err, i) => (
+              <li key={i} className="font-mono">
+                {err}
+              </li>
+            ))}
+          </ul>
+        </Alert>
+      )}
+
+      {maxTier >= 2 && (
+        <Alert
+          tone={maxTier >= 3 ? "enforcement" : "warning"}
+          title={`This policy requests Tier ${maxTier} actions`}
+        >
+          {maxTier >= 3
+            ? "It can permanently remove resources when all five gates agree. Review the rules below carefully."
+            : "It can change resources. Those changes are reversible and their undo payloads are stored before anything is applied."}
+        </Alert>
+      )}
+
+      <div className="grid min-h-0 flex-1 grid-cols-12 gap-4">
+        {/* Policy list */}
+        <Card className="col-span-12 flex flex-col overflow-hidden lg:col-span-2">
+          <div className="border-b border-border p-2">
+            <Input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter policies"
+              className="h-7 text-2xs"
             />
           </div>
-          {validationErrors.length > 0 && (
-            <div className="bg-red-950/30 border-t border-red-900/50 p-3 shrink-0 max-h-40 overflow-y-auto">
-              <h4 className="text-red-400 text-sm font-medium flex items-center mb-1"><AlertTriangle className="w-4 h-4 mr-1" /> Validation Errors</h4>
-              <ul className="list-disc pl-5 text-red-300 text-xs space-y-1">
-                {validationErrors.map((e, i) => <li key={i}>{e}</li>)}
-              </ul>
-            </div>
-          )}
-        </div>
+          <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
+            {store.loading && !store.files.length
+              ? Array.from({ length: 8 }).map((_, i) => (
+                  <Skeleton key={i} className="h-7 w-full" />
+                ))
+              : visibleFiles.map((file) => {
+                  const meta = store.registry?.policies.find((p) => p.name === file);
+                  const active = file === store.selectedName;
+                  return (
+                    <button
+                      key={file}
+                      type="button"
+                      onClick={() => void store.select(file)}
+                      className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-2xs transition-colors ${
+                        active
+                          ? "bg-accent-subtle text-accent"
+                          : "text-content-muted hover:bg-surface-raised hover:text-content"
+                      }`}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        {file.replace(/\.rego$/, "")}
+                      </span>
+                      {meta && meta.max_tier >= 2 && (
+                        <TierBadge tier={meta.max_tier} showLabel={false} />
+                      )}
+                    </button>
+                  );
+                })}
+          </nav>
+        </Card>
 
-        {/* Right pane: Split vertically (Input / Output) */}
-        <div className="w-1/2 flex flex-col gap-4">
-          <div className="flex-1 flex flex-col bg-[#11151c] rounded-xl shadow-lg border border-slate-800 overflow-hidden">
-            <div className="flex items-center justify-between p-3 border-b border-slate-800 bg-[#161b22]">
-              <span className="text-sm font-medium text-slate-300">Input Data (JSON)</span>
-              <button 
-                onClick={handleEvaluate} 
-                disabled={evaluating || !selectedPolicy}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-transparent text-[#8acaff] hover:bg-[#8acaff14] text-[13px] font-medium rounded-[4px] disabled:opacity-50 transition-colors"
-              >
-                <Play className="w-4 h-4" /> Evaluate
-              </button>
-            </div>
-            <div className="flex-1 bg-[#1e1e1e]">
-              <Editor
-                height="100%"
-                defaultLanguage="json"
-                value={inputJson}
-                onChange={(v) => setInputJson(v || '')}
-                theme="vs-dark"
-                options={{ minimap: { enabled: false }, fontSize: 14, padding: { top: 16 } }}
-              />
-            </div>
-          </div>
-
-          <div className="flex-1 flex flex-col bg-[#11151c] rounded-xl shadow-lg border border-slate-800 overflow-hidden">
-            <div className="p-3 border-b border-slate-800 bg-[#161b22]">
-              <span className="text-sm font-medium text-slate-300">Evaluation Output</span>
-            </div>
-            <div className="flex-1 bg-[#1e1e1e]">
-              <Editor
-                height="100%"
-                defaultLanguage="json"
-                value={outputJson}
-                theme="vs-dark"
-                options={{ minimap: { enabled: false }, fontSize: 14, readOnly: true, padding: { top: 16 } }}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {showDiffModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b0f15]/80 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="bg-[#11151c] border border-slate-800 rounded-xl shadow-2xl w-full max-w-6xl h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95">
-            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-[#161b22] shrink-0">
-                <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-                    Review Policy Changes: {selectedPolicy}
-                </h3>
-                <button onClick={() => setShowDiffModal(false)} className="p-2 rounded-full hover:bg-slate-800 transition-colors">
-                    <X className="w-5 h-5 text-slate-400" />
-                </button>
-            </div>
-            <div className="flex-1 bg-[#1e1e1e]">
-              {prUrl ? (
-                <div className="h-full flex flex-col items-center justify-center bg-[#0b0f15] text-slate-300 p-8">
-                  <div className="w-16 h-16 bg-[#8acaff14] rounded-full flex items-center justify-center mb-6">
-                    <Check className="w-8 h-8 text-[#8acaff]" />
-                  </div>
-                  <h4 className="text-xl font-medium text-slate-100 mb-2">Pull Request Created!</h4>
-                  <p className="text-slate-400 mb-6 max-w-md text-center">
-                    Your policy changes have been successfully proposed. Please review and merge the pull request to apply them to <code>{targetBranch}</code>.
-                  </p>
-                  <a 
-                    href={prUrl} 
-                    target="_blank" 
-                    rel="noreferrer"
-                    className="flex items-center gap-2 px-4 py-2 bg-[#1b232d] text-[#8acaff] border border-[#8acaff]/30 rounded hover:bg-[#8acaff14] font-medium transition-colors"
-                  >
-                    View Pull Request <ExternalLink className="w-4 h-4" />
-                  </a>
-                </div>
-              ) : (
-                <DiffEditor
-                  height="100%"
-                  language="ruby"
-                  original={originalContent}
-                  modified={policyContent}
-                  theme="vs-dark"
-                  options={{ minimap: { enabled: false }, fontSize: 14, renderSideBySide: true, readOnly: true }}
-                />
+        {/* Editor */}
+        <Card className="col-span-12 flex min-h-[520px] flex-col overflow-hidden lg:col-span-6">
+          <CardHeader className="flex-row items-center justify-between py-2.5">
+            <CardTitle className="font-mono text-xs">
+              {store.selectedName ?? "No policy selected"}
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              {dirty && <Badge variant="warning">unsaved</Badge>}
+              {store.metadata && (
+                <Badge variant="outline">{store.metadata.rule_count} rules</Badge>
               )}
             </div>
-            <div className="p-4 border-t border-slate-800 bg-[#161b22] flex justify-end gap-3 shrink-0">
-                <button 
-                  className="px-4 py-2 bg-[#1b232d] text-slate-300 border border-slate-700 rounded hover:bg-[#252f3d] text-sm font-medium transition-colors"
-                  onClick={() => setShowDiffModal(false)}
-                >
-                  {prUrl ? 'Close' : 'Cancel'}
-                </button>
-                {!prUrl && (
-                  <button 
-                      disabled={saving}
-                      onClick={executeSave}
-                      className="btn-primary gap-2"
-                  >
-                      {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : 
-                       (githubEnabled ? <GitPullRequest className="w-4 h-4" /> : <Check className="w-4 h-4" />)}
-                      {githubEnabled ? 'Create Pull Request' : 'Confirm & Save'}
-                  </button>
-                )}
-            </div>
+          </CardHeader>
+          <div className="min-h-0 flex-1">
+            <Editor
+              height="100%"
+              language="rego"
+              theme="vs-dark"
+              value={store.content}
+              onChange={(value) => store.setContent(value ?? "")}
+              options={MONACO_OPTIONS}
+            />
           </div>
-        </div>
+        </Card>
+
+        {/* Side panel */}
+        <Card className="col-span-12 flex min-h-[520px] flex-col overflow-hidden lg:col-span-4">
+          <Tabs
+            value={panel}
+            onChange={(id) => setPanel(id as PanelTab)}
+            items={[
+              { id: "metadata", label: "Metadata", count: store.metadata?.rule_count },
+              { id: "history", label: "History", count: store.revisions.length },
+              { id: "english", label: "Plain English" },
+              { id: "playground", label: "Playground" },
+              { id: "author", label: "Draft" },
+              { id: "ask", label: "Ask" },
+            ]}
+          />
+
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {panel === "metadata" && (
+              <PolicyMetadataPanel metadata={store.metadata} dirty={dirty} />
+            )}
+
+            {panel === "history" && (
+              <PolicyHistoryPanel
+                revisions={store.revisions}
+                available={store.historyAvailable}
+                uncommitted={store.metadata?.uncommitted_changes}
+                policyName={store.selectedName ?? undefined}
+                onView={store.loadRevision}
+                onRestore={store.restoreFromGit}
+              />
+            )}
+
+            {panel === "english" && store.selectedName && (
+              <PolicyEnglishPanel
+                policyName={store.selectedName}
+                content={store.content}
+              />
+            )}
+
+            {panel === "playground" && (
+              <PlaygroundPanel
+                input={inputJson}
+                onInputChange={setInputJson}
+                output={outputJson}
+                evaluating={evaluating}
+                disabled={!store.selectedName}
+                onEvaluate={() => void evaluate()}
+              />
+            )}
+
+            {panel === "author" && (
+              <PolicyAuthorPanel
+                policyName={store.selectedName ?? undefined}
+                currentContent={store.content}
+                onApply={(content, name) => {
+                  // Into the editor as an unsaved change, so the draft goes
+                  // through the same validate-and-save path a hand-written
+                  // edit does.
+                  if (name !== store.selectedName && store.files.includes(name)) {
+                    void store.select(name).then(() => store.setContent(content));
+                  } else {
+                    store.setContent(content);
+                  }
+                  setPanel("metadata");
+                }}
+              />
+            )}
+
+            {panel === "ask" && (
+              <div className="h-full p-3">
+                <AgentChatPanel
+                  contextNote={store.selectedName ?? undefined}
+                />
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {store.registry && store.registry.summary.max_tier <= 1 && (
+        <p className="flex items-center gap-1.5 text-2xs text-content-subtle">
+          <AlertTriangle className="size-3" aria-hidden />
+          All {store.registry.summary.rule_count} rules across{" "}
+          {store.registry.summary.policy_count} policies currently request notify-level
+          actions only. Nothing in this repository can destroy a resource as shipped.
+        </p>
       )}
     </div>
   );

@@ -2,36 +2,118 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --brand-primary: #4299e0;
-  color-scheme: dark;
-}
+/*
+ * Theme tokens.
+ *
+ * Every colour the app uses is declared here and referenced through
+ * tailwind.config.js by semantic name. Components should not contain hex
+ * values -- if a component needs a colour that is not in this file, the palette
+ * is missing a concept and the fix belongs here.
+ *
+ * `--brand-primary` is overwritten at runtime by the branding endpoint, which
+ * is why it is a variable rather than a compiled value.
+ */
 
-@layer components {
-  .btn-primary {
-    @apply inline-flex items-center justify-center h-8 px-3 rounded-[4px] text-[13px] font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none cursor-pointer;
-    background-color: rgb(66, 153, 224) !important;
-    color: rgb(17, 23, 28) !important;
-    border-color: transparent !important;
-    text-shadow: none !important;
-    box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.45) !important;
-    line-height: 20px !important;
-  }
-  .btn-primary:hover {
-    background-color: rgb(53, 135, 201) !important;
-  }
+:root {
+  color-scheme: dark;
+
+  /* Surfaces, darkest to lightest */
+  --canvas: #0b0f15;
+  --surface: #11151c;
+  --surface-raised: #161b24;
+  --surface-overlay: #1b2029;
+
+  --border: #1f2733;
+  --border-strong: #2c3746;
+
+  /* Text */
+  --content: #e8ecf0;
+  --content-muted: #94a3b8;
+  --content-subtle: #64748b;
+  --content-inverse: #0b0f15;
+
+  /* Brand. --brand-primary is replaced at runtime; the others track it. */
+  --brand-primary: #4299e0;
+  --brand-primary-hover: #3587c9;
+  --brand-primary-subtle: rgba(66, 153, 224, 0.12);
+
+  --accent: #8acaff;
+  --accent-subtle: rgba(138, 202, 255, 0.08);
+
+  /* Status */
+  --success: #4ade80;
+  --success-subtle: rgba(74, 222, 128, 0.1);
+  --warning: #fbbf24;
+  --warning-subtle: rgba(251, 191, 36, 0.1);
+  --danger: #f87171;
+  --danger-subtle: rgba(248, 113, 113, 0.1);
+  --info: #8acaff;
+  --info-subtle: rgba(138, 202, 255, 0.1);
+
+  /*
+   * The action ladder. These four colours carry meaning: they are the only
+   * signal in a dense table that separates "we sent an email" from "we deleted
+   * something". The steps are deliberately far apart.
+   */
+  --tier-observe: #94a3b8;
+  --tier-observe-subtle: rgba(148, 163, 184, 0.12);
+  --tier-notify: #8acaff;
+  --tier-notify-subtle: rgba(138, 202, 255, 0.12);
+  --tier-restrict: #fbbf24;
+  --tier-restrict-subtle: rgba(251, 191, 36, 0.12);
+  --tier-destructive: #f87171;
+  --tier-destructive-subtle: rgba(248, 113, 113, 0.14);
+
+  --severity-critical: #f87171;
+  --severity-high: #fb923c;
+  --severity-medium: #fbbf24;
+  --severity-low: #94a3b8;
+  --severity-none: #475569;
 }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background-color: var(--canvas);
+  color: var(--content);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #0b0f15;
-  color: #e2e8f0;
 }
 
-/* Custom scrollbar for a cleaner dark UI */
+@layer base {
+  *:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Chrome's autofill styling is unreadable on a dark surface. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--content);
+    -webkit-box-shadow: 0 0 0 1000px var(--surface-raised) inset;
+  }
+}
+
+@layer components {
+  /*
+   * Retained because Monaco and react-markdown render into containers this app
+   * does not own, so their styling cannot be expressed as component props.
+   */
+  .prose-sentinel {
+    @apply prose prose-invert max-w-none;
+    --tw-prose-body: var(--content-muted);
+    --tw-prose-headings: var(--content);
+    --tw-prose-links: var(--accent);
+    --tw-prose-bold: var(--content);
+    --tw-prose-code: var(--accent);
+    --tw-prose-quotes: var(--content-muted);
+    --tw-prose-hr: var(--border);
+    --tw-prose-th-borders: var(--border-strong);
+    --tw-prose-td-borders: var(--border);
+  }
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -40,9 +122,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background-color: #334155;
+  background-color: var(--border-strong);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #475569;
+  background-color: var(--content-subtle);
 }
