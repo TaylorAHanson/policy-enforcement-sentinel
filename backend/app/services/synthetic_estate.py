@@ -457,6 +457,23 @@ def _slugify(value: str) -> str:
     return slug[:60] or "resource"
 
 
+#: What a real owner's address is replaced with before a fixture is written.
+ANONYMISED_OWNER = "owner@example.com"
+
+
+def _is_personal(value: Any) -> bool:
+    """Whether a value identifies a person and must not reach a fixture file.
+
+    An address does. ``"unknown"`` does not — discovery writes it for a resource
+    whose owner it could not determine, and it is precisely what the no-owner
+    rules test for. Replacing it with a valid-looking address turns an unowned
+    resource into an owned one, which silently inverts the expectation the
+    capture recorded a moment earlier: a fixture asserting that the no-owner
+    rule fires, on a resource that now has an owner.
+    """
+    return "@" in str(value or "")
+
+
 def capture_from_run(
     db,
     *,
@@ -508,15 +525,23 @@ def capture_from_run(
     # was evaluated against it. Taking one finding per fixture would produce
     # expectations that are silently incomplete, and an incomplete `fires` list
     # reads as "these rules should not have fired".
-    by_resource: Dict[str, Dict[str, Any]] = {}
+    by_resource: Dict[tuple, Dict[str, Any]] = {}
     for finding in query.all():
         snapshot = (finding.data or {}).get("resource")
         if not isinstance(snapshot, dict) or not snapshot.get("type"):
             continue
 
-        key = str(finding.resource_id or snapshot.get("id") or "")
-        if not key:
+        resource_id = str(finding.resource_id or snapshot.get("id") or "")
+        if not resource_id:
             continue
+
+        # Keyed by type *and* id. Ids are only unique within a type, and a real
+        # workspace had `regression-validation-dev` as both an app and a
+        # Lakebase instance. Keyed by id alone the two merged into one fixture:
+        # the app's resource document carrying the union of both resources'
+        # expectations, so it asserted that four Lakebase rules pass against an
+        # app they never even run on.
+        key = (str(snapshot.get("type")), resource_id)
 
         entry = by_resource.setdefault(
             key,
@@ -550,13 +575,15 @@ def capture_from_run(
             # An owner's email address is the only thing in a resource snapshot
             # that identifies a person, and a fixture is a file in a repository
             # that anyone with read access can see.
-            if resource.get("owner"):
-                resource["owner"] = "owner@example.com"
+            if _is_personal(resource.get("owner")):
+                resource["owner"] = ANONYMISED_OWNER
             tags = resource.get("tags")
-            if isinstance(tags, dict) and tags.get("owner"):
-                resource = {**resource, "tags": {**tags, "owner": "owner@example.com"}}
+            if isinstance(tags, dict) and _is_personal(tags.get("owner")):
+                resource = {**resource, "tags": {**tags, "owner": ANONYMISED_OWNER}}
 
-        name = f"captured_{_slugify(str(entry['name']))}"
+        # The type is in the filename because two resources of different types
+        # can share a name as readily as an id.
+        name = f"captured_{_slugify(str(resource.get('type')))}_{_slugify(str(entry['name']))}"
         payload = {
             "description": (
                 f"Captured from run {run_id} — a real {resource.get('type')} as the "

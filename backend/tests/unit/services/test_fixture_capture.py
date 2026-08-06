@@ -172,6 +172,92 @@ def test_anonymising_does_not_drop_the_owner_field(db_session, tmp_path):
     assert set(resource) == set(CLUSTER)
 
 
+def test_an_unknown_owner_is_not_replaced_with_a_real_looking_address(
+    db_session, tmp_path
+):
+    """Discovery writes "unknown" for an owner it could not determine, and that
+    is exactly what the no-owner rules test for. Anonymising it into a valid
+    address turns an unowned resource into an owned one and inverts the
+    expectation the capture recorded a line earlier — a fixture asserting the
+    no-owner rule fires, on a resource that now has an owner.
+
+    This shipped: a captured volume expected CTL-VOL-004 and could not pass.
+    """
+    run_id = add_run(db_session)
+    unowned = {**CLUSTER, "owner": "unknown", "tags": {}}
+    add_finding(db_session, run_id, rule="CTL-VOL-004", resource=unowned)
+
+    written = synthetic_estate.capture_from_run(db_session, directory=str(tmp_path))
+    resource = read(tmp_path, written[0]["name"])["resource"]
+
+    assert resource["owner"] == "unknown"
+
+
+@pytest.mark.parametrize("owner", ["System user", "vending-machine-sp", ""])
+def test_only_an_address_is_treated_as_identifying(db_session, tmp_path, owner):
+    """A service principal's name and a placeholder are not people. Rewriting
+    them loses information for no privacy gain."""
+    run_id = add_run(db_session)
+    add_finding(
+        db_session, run_id, rule="CTL-CLU-002", resource={**CLUSTER, "owner": owner}
+    )
+
+    written = synthetic_estate.capture_from_run(db_session, directory=str(tmp_path))
+    assert read(tmp_path, written[0]["name"])["resource"]["owner"] == owner
+
+
+def test_two_types_sharing_an_id_stay_two_fixtures(db_session, tmp_path):
+    """Ids are unique within a type, not across the estate. A real workspace had
+    `regression-validation-dev` as both an app and a Lakebase instance; keyed by
+    id alone the two merged into one fixture, and the app's document ended up
+    carrying the Lakebase rules' expectations — asserting that four rules pass
+    against a resource type they never run on."""
+    run_id = add_run(db_session)
+    app = {"id": "shared-name", "type": "app", "name": "shared-name", "tags": {}}
+    lakebase = {
+        "id": "shared-name",
+        "type": "lakebase_instance",
+        "name": "shared-name",
+        "tags": {},
+    }
+    add_finding(db_session, run_id, rule="SEC-APP-001", resource=app)
+    add_finding(db_session, run_id, rule="CTL-LKB-004", resource=lakebase)
+
+    written = synthetic_estate.capture_from_run(db_session, directory=str(tmp_path))
+
+    assert len(written) == 2
+    by_type = {entry["resource_type"]: entry for entry in written}
+    assert by_type["app"]["fires"] == ["SEC-APP-001"]
+    assert by_type["lakebase_instance"]["fires"] == ["CTL-LKB-004"]
+
+
+def test_the_filename_carries_the_type_so_two_of_them_cannot_collide(
+    db_session, tmp_path
+):
+    """Names collide across types as readily as ids do, and the second write
+    would silently overwrite the first."""
+    run_id = add_run(db_session)
+    add_finding(
+        db_session,
+        run_id,
+        rule="SEC-APP-001",
+        resource={"id": "a", "type": "app", "name": "shared-name", "tags": {}},
+    )
+    add_finding(
+        db_session,
+        run_id,
+        rule="CTL-LKB-004",
+        resource={"id": "b", "type": "lakebase_instance", "name": "shared-name", "tags": {}},
+    )
+
+    written = synthetic_estate.capture_from_run(db_session, directory=str(tmp_path))
+    names = {entry["name"] for entry in written}
+
+    assert len(names) == 2
+    assert "captured_app_shared_name" in names
+    assert "captured_lakebase_instance_shared_name" in names
+
+
 # --- Selection --------------------------------------------------------------
 
 
