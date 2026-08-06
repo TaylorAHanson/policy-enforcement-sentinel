@@ -9,6 +9,7 @@ from app.db.base import Base  # noqa: F401
 from app.db.allowlist import AllowlistModel  # noqa: F401
 from app.db.app_setting import AppSettingModel  # noqa: F401
 from app.db.enforcement_audit import EnforcementAuditModel  # noqa: F401
+from app.db.policy_explanation import PolicyExplanationModel  # noqa: F401
 from app.db.sentinel_finding import SentinelFindingModel  # noqa: F401
 from app.db.sentinel_run import SentinelRunModel  # noqa: F401
 
@@ -17,6 +18,7 @@ __all__ = [
     "AllowlistModel",
     "AppSettingModel",
     "EnforcementAuditModel",
+    "PolicyExplanationModel",
     "SentinelFindingModel",
     "SentinelRunModel",
 ]

@@ -1,0 +1,29 @@
+{
+  "description": "An external volume with no Unity Catalog owner recorded.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "prod.raw.landing",
+    "name": "landing",
+    "type": "storage",
+    "owner": "",
+    "storage_type": "EXTERNAL",
+    "catalog": "prod",
+    "schema": "raw",
+    "tags": {
+      "data_classification": "internal"
+    }
+  },
+  "expect": {
+    "fires": [
+      "CTL-VOL-004"
+    ],
+    "passes": [
+      "CTL-VOL-003",
+      "SEC-VOL-001",
+      "SEC-VOL-002"
+    ]
+  }
+}

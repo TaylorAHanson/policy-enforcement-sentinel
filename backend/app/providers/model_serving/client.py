@@ -150,8 +150,10 @@ class ModelServingClient:
         talks to the same workspace as the scanner. A deployment that configures
         one and not the other is a support case nobody enjoys.
         """
+        from app.core.config import qualify_host
+
         if self._host and self._token:
-            return self._host.rstrip("/"), self._token
+            return qualify_host(self._host) or "", self._token
 
         try:
             from databricks.sdk import WorkspaceClient
@@ -168,7 +170,7 @@ class ModelServingClient:
                 # service principal, and the last resort locally.
                 client = WorkspaceClient()
 
-            host = (self._host or client.config.host or "").rstrip("/")
+            host = qualify_host(self._host or client.config.host) or ""
             token = self._token
             if not token:
                 # `authenticate()` runs whichever credential strategy applies —

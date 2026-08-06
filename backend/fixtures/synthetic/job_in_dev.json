@@ -1,0 +1,32 @@
+{
+  "description": "Outside production neither production-scoped rule applies.",
+  "workspace": "synthetic-dev",
+  "workspace_type": "enterprise",
+  "environment": "dev",
+  "source": "authored",
+  "resource": {
+    "id": "884422",
+    "name": "nightly-load",
+    "type": "job",
+    "owner": "svc-etl@company.com",
+    "schedule": "0 0 2 * * ?",
+    "paused": false,
+    "max_concurrent_runs": 1,
+    "owner_type": "service_principal",
+    "idle_days": 1,
+    "tags": {
+      "cost-center": "CC-4100",
+      "owner": "data-platform@company.com"
+    }
+  },
+  "expect": {
+    "fires": [],
+    "passes": [
+      "CST-JOB-003",
+      "CST-JOB-004",
+      "CTL-JOB-002",
+      "CTL-JOB-005",
+      "SEC-JOB-001"
+    ]
+  }
+}

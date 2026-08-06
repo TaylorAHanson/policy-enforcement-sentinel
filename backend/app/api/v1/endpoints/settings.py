@@ -90,7 +90,13 @@ def update_setting(
         raise HTTPException(status_code=400, detail=str(e))
 
     db.commit()
-    return {"key": key, "value": value, "danger": key in settings_store.DANGER_KEYS}
+    field = settings_store.FIELDS_BY_KEY[key]
+    return {
+        "key": key,
+        # A write must not echo a secret back; the caller already has it.
+        "value": settings_store.public_value(field, value),
+        "danger": key in settings_store.DANGER_KEYS,
+    }
 
 
 @router.put("")
@@ -102,7 +108,9 @@ def update_settings(
 
     for key, value in payload.values.items():
         try:
-            applied[key] = settings_store.set_override(db, key, value, payload.updated_by)
+            stored = settings_store.set_override(db, key, value, payload.updated_by)
+            field = settings_store.FIELDS_BY_KEY[key]
+            applied[key] = settings_store.public_value(field, stored)
         except ValueError as e:
             errors[key] = str(e)
 
@@ -124,4 +132,9 @@ def reset_setting(key: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
 
     settings_store.clear_override(db, key)
     db.commit()
-    return {"key": key, "value": getattr(settings, key, None), "overridden": False}
+    field = settings_store.FIELDS_BY_KEY[key]
+    return {
+        "key": key,
+        "value": settings_store.public_value(field, getattr(settings, key, None)),
+        "overridden": False,
+    }

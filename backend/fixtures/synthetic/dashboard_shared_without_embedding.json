@@ -1,0 +1,27 @@
+{
+  "description": "The other half. Shared with everyone but querying as the reader, which is the arrangement SEC-DSH-001 is explicitly not about.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "dsh-001",
+    "name": "Revenue overview",
+    "type": "dashboard",
+    "owner": "analytics@company.com",
+    "uses_embedded_credentials": false,
+    "is_published": true,
+    "shared_with": [
+      "ALL_USERS"
+    ],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [],
+    "passes": [
+      "CTL-DSH-002",
+      "CTL-DSH-003",
+      "SEC-DSH-001"
+    ]
+  }
+}

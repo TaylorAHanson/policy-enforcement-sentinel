@@ -1,0 +1,30 @@
+{
+  "description": "No cost tags, so the spend cannot be attributed to anyone.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "wh-01",
+    "name": "analytics-wh",
+    "type": "sql_warehouse",
+    "owner": "data-platform@company.com",
+    "state": "RUNNING",
+    "auto_stop_mins": 20,
+    "max_num_clusters": 4,
+    "warehouse_type": "PRO",
+    "serverless": true,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CST-WHS-004",
+      "CTL-WHS-001"
+    ],
+    "passes": [
+      "CST-WHS-002",
+      "CST-WHS-003",
+      "CST-WHS-005"
+    ]
+  }
+}

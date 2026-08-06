@@ -1,0 +1,28 @@
+{
+  "description": "A published dashboard whose creator came back empty. This rule needed both fixes to work: `is_published` had to start being collected, and the owner check had to stop testing for a missing key.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "dsh-001",
+    "name": "Revenue overview",
+    "type": "dashboard",
+    "owner": "",
+    "uses_embedded_credentials": false,
+    "is_published": true,
+    "shared_with": [
+      "data-analysts"
+    ],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CTL-DSH-002"
+    ],
+    "passes": [
+      "CTL-DSH-003",
+      "SEC-DSH-001"
+    ]
+  }
+}

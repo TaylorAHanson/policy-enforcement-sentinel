@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import api, {
   ApiError,
+  type FieldWarning,
   type PolicyMetadata,
   type PolicyRegistry,
   type PolicyRevision,
@@ -26,10 +27,17 @@ interface PolicyState {
   loading: boolean;
   submitting: boolean;
   error: string | null;
-  validation: { valid: boolean; errors: string[] } | null;
+  validation: {
+    valid: boolean;
+    errors: string[];
+    /** Compiles, but reads data nothing collects — so it can never fire. */
+    warnings?: FieldWarning[];
+  } | null;
 
   loadAll: () => Promise<void>;
   select: (name: string) => Promise<void>;
+  /** Open a scaffolded policy that has no committed version yet. */
+  startDraft: (name: string, content: string) => void;
   setContent: (content: string) => void;
   discardDraft: () => void;
   validate: () => Promise<boolean>;
@@ -171,6 +179,28 @@ export const usePolicyStore = create<PolicyState>((set, get) => ({
     }
   },
 
+  /**
+   * Open a policy that does not exist on the branch yet.
+   *
+   * A scaffolded policy has no committed version to fetch, so `select` would
+   * 404 on it. Seeding the draft directly means a new policy reaches the editor
+   * by the same path as any other unsaved edit, and the empty
+   * `committedContent` is what makes it read as dirty — which it is, entirely.
+   */
+  startDraft: (name, content) => {
+    writeDraft(name, content, "");
+    set({
+      selectedName: name,
+      content,
+      committedContent: "",
+      metadata: null,
+      revisions: [],
+      validation: null,
+      error: null,
+      loading: false,
+    });
+  },
+
   setContent: (content) => {
     const { selectedName, committedContent } = get();
     if (selectedName) writeDraft(selectedName, content, committedContent);
@@ -194,6 +224,13 @@ export const usePolicyStore = create<PolicyState>((set, get) => ({
       set({ validation: result });
       if (!result.valid) {
         toast.error("Policy has errors", result.errors.join("; "));
+      } else if (result.warnings?.length) {
+        // Valid is not the same as working, and this is the gap between them:
+        // the compiler is happy and the rule can never match.
+        toast.warning(
+          "Compiles, but would never fire",
+          `${result.warnings[0].field} is not collected for this resource type.`,
+        );
       }
       return result.valid;
     } catch (e) {

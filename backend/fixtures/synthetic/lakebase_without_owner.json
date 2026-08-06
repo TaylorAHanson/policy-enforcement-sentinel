@@ -1,0 +1,29 @@
+{
+  "description": "An instance whose creator came back empty.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "lb-prod",
+    "name": "lb-prod",
+    "type": "lakebase_instance",
+    "owner": "",
+    "state": "AVAILABLE",
+    "capacity": "CU_2",
+    "capacity_units": 2,
+    "stopped": false,
+    "retention_window_days": 14,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CTL-LKB-004"
+    ],
+    "passes": [
+      "CST-LKB-001",
+      "CST-LKB-003",
+      "CTL-LKB-002"
+    ]
+  }
+}

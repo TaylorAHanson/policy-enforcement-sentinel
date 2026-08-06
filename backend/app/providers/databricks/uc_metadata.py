@@ -45,6 +45,37 @@ SELECT
 FROM {catalog}.information_schema.table_tags
 """
 
+# Aggregated in the warehouse rather than in Python: a catalog has orders of
+# magnitude more columns than tables, and only the count comes back.
+_COLUMN_QUERY = """
+SELECT
+    table_catalog,
+    table_schema,
+    table_name,
+    count(*) AS column_count,
+    count_if(comment IS NULL OR trim(comment) = '') AS undescribed_count
+FROM {catalog}.information_schema.columns
+WHERE table_schema <> 'information_schema'
+GROUP BY table_catalog, table_schema, table_name
+"""
+
+# Deliberately absent: a grant read.
+#
+# `information_schema.table_privileges` and `volume_privileges` look like the
+# obvious source for "who can reach this table", and they are not. They filter
+# to the caller: unless you own the object, own its catalog or schema, or are a
+# metastore admin, you are shown **only your own grants**. Databricks documents
+# a further limitation where even MANAGE holders see only their own.
+#
+# So a scanner running as an ordinary service principal would read back an
+# almost empty result and conclude that nothing is over-shared. That is the
+# worst failure this system can have: a security rule that reports clean
+# because it is blind. Better to collect nothing and have the rule declare
+# itself blocked than to collect a convincing lie.
+#
+# Fixing this is a permissions decision, not a code one — see the "blocked on
+# permission" category in `rule_diagnosis`.
+
 
 def pick_warehouse(workspace_client, preferred_id: Optional[str] = None) -> Optional[str]:
     """Choose a warehouse to run metadata queries on."""
@@ -62,6 +93,14 @@ def pick_warehouse(workspace_client, preferred_id: Optional[str] = None) -> Opti
         if getattr(candidate, "id", None):
             return candidate.id
     return None
+
+
+def _to_int(value: Any) -> int:
+    """SQL counts arrive as strings over the statement API."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _run_statement(workspace_client, warehouse_id: str, statement: str) -> List[Dict[str, Any]]:
@@ -129,6 +168,10 @@ def fetch_uc_metadata(
                 "created": row.get("created"),
                 "last_altered": row.get("last_altered"),
                 "tags": {},
+                # No column rows for a table means we could not read its
+                # columns, not that it has none described. Absent rather than
+                # True, so a failed read does not read as compliance.
+                "all_columns_have_descriptions": None,
             }
 
         try:
@@ -138,15 +181,31 @@ def fetch_uc_metadata(
         except Exception as e:
             # Tags are an enrichment; their absence shouldn't discard the tables.
             logger.debug("Could not read table tags for catalog %s: %s", catalog, e)
-            continue
+        else:
+            for row in tag_rows:
+                full_name = (
+                    f"{row.get('catalog_name')}.{row.get('schema_name')}.{row.get('table_name')}"
+                )
+                entry = metadata.get(full_name)
+                if entry is not None and row.get("tag_name"):
+                    entry["tags"][row["tag_name"]] = row.get("tag_value") or ""
 
-        for row in tag_rows:
-            full_name = (
-                f"{row.get('catalog_name')}.{row.get('schema_name')}.{row.get('table_name')}"
+        try:
+            column_rows = _run_statement(
+                workspace_client, resolved_warehouse, _COLUMN_QUERY.format(catalog=quoted)
             )
-            entry = metadata.get(full_name)
-            if entry is not None and row.get("tag_name"):
-                entry["tags"][row["tag_name"]] = row.get("tag_value") or ""
+        except Exception as e:
+            logger.debug("Could not read column comments for catalog %s: %s", catalog, e)
+        else:
+            for row in column_rows:
+                full_name = (
+                    f"{row.get('table_catalog')}.{row.get('table_schema')}.{row.get('table_name')}"
+                )
+                entry = metadata.get(full_name)
+                if entry is not None:
+                    entry["all_columns_have_descriptions"] = _to_int(
+                        row.get("undescribed_count")
+                    ) == 0
 
     logger.info(
         "Batched UC metadata read: %d tables across %d catalog(s).",

@@ -29,6 +29,25 @@ class BaseResourceHandler(ABC):
     #: Resource type string as it appears in the Rego input document.
     resource_type: str = "unknown"
 
+    #: Field name -> what it holds, for every key ``discover()`` puts on a
+    #: resource. This is the vocabulary a policy for this type is allowed to
+    #: use, and it is declared rather than inferred so it can be read without
+    #: running a scan.
+    #:
+    #: It exists because of the failure mode that has now bitten this
+    #: repository twice: Rego treats a reference to a key that was never
+    #: supplied as simply not matching, so a rule about ``idle_hours`` on a
+    #: resource type whose handler never collects ``idle_hours`` does not error.
+    #: It passes. Every resource looks compliant, the dashboard is green, and
+    #: the rule protects nothing. A missing field is not a runtime error here —
+    #: it is a silent, permanent false negative, which is why it needs catching
+    #: before the policy is written rather than after it ships.
+    #:
+    #: Keep this honest. A field listed here that discovery does not actually
+    #: set is worse than one that is missing, because it invites exactly the
+    #: rule that cannot work.
+    discovered_fields: Dict[str, str] = {}
+
     def __init__(self, workspace_client):
         self.workspace_client = workspace_client
 

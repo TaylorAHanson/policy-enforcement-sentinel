@@ -22,6 +22,21 @@ class VolumeResourceHandler(BaseResourceHandler, SupportsQuarantine, SupportsDel
 
     resource_type = "storage"
 
+    discovered_fields = {
+        "id": "The three-level full name, catalog.schema.volume.",
+        "name": "The volume name.",
+        "type": 'Always "storage".',
+        "owner": "The Unity Catalog owner.",
+        "storage_type": "MANAGED or EXTERNAL.",
+        "catalog": "The containing catalog.",
+        "schema": "The containing schema.",
+        # Deliberately not collected: `principals` and `grants`. Unity Catalog
+        # only discloses another principal's grants to the object's owner or a
+        # metastore admin, and this scanner is neither. What it could read back
+        # is its own access, which would make every volume look unshared.
+        "tags": "Always empty. Volume tags are not read during discovery.",
+    }
+
     async def discover(self) -> List[Dict[str, Any]]:
         resources: List[Dict[str, Any]] = []
         for catalog in self.workspace_client.catalogs.list():

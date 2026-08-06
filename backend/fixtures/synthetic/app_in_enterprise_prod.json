@@ -1,0 +1,29 @@
+{
+  "description": "An app in enterprise production. SEC-APP-001 fires because no risk review is recorded, and CST-APP-004 fires because the Apps API exposes no tags at all -- so this pair is what every production app looks like today.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "sales-forecast",
+    "name": "sales-forecast",
+    "type": "app",
+    "owner": "analytics@company.com",
+    "state": "RUNNING",
+    "url": "https://example.databricksapps.com",
+    "shared_with": [
+      "analytics-team"
+    ],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CST-APP-004",
+      "SEC-APP-001"
+    ],
+    "passes": [
+      "CST-APP-003",
+      "SEC-APP-002"
+    ]
+  }
+}

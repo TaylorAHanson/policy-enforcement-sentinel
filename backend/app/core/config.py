@@ -10,9 +10,30 @@ pre-override value and silently ignores whatever the admin configured.
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.default_config import DEFAULTS
+
+
+def qualify_host(value: Optional[str]) -> Optional[str]:
+    """Give a workspace host a scheme and no trailing slash.
+
+    A deployed Databricks App receives ``DATABRICKS_HOST`` as a bare hostname.
+    The SDK tolerates that and prepends https:// itself, so anything going
+    through ``WorkspaceClient`` works and the gap stays hidden — until something
+    builds a URL by hand, at which point httpx rejects it for having no
+    protocol.
+    """
+    if not value:
+        return value
+
+    host = value.strip().rstrip("/")
+    if not host:
+        return None
+    if not host.startswith(("http://", "https://")):
+        host = f"https://{host}"
+    return host
 
 
 class Settings(BaseSettings):
@@ -192,8 +213,20 @@ class Settings(BaseSettings):
         raw = self.DESTRUCTIVE_ACTION_WORKSPACES or ""
         return [part.strip() for part in raw.split(",") if part.strip()]
 
+    @field_validator("DATABRICKS_HOST", "DATABRICKS_WORKSPACE_URL", mode="after")
+    @classmethod
+    def _qualify_host(cls, value: Optional[str]) -> Optional[str]:
+        """Every reader of the host gets a usable base URL, whatever supplied it
+        — the platform, a .env, or the Settings page."""
+        return qualify_host(value)
+
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        # So an override written by settings_store, which assigns to the live
+        # object, runs the validators above rather than bypassing them.
+        validate_assignment=True,
     )
 
 

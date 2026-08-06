@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import Editor from "@monaco-editor/react";
 import {
   AlertTriangle,
+  ArrowLeft,
   Check,
+  Code2,
   ExternalLink,
   FileClock,
   GitPullRequest,
@@ -11,18 +14,19 @@ import {
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardHeader, CardTitle } from "../components/ui/card";
-import { Input } from "../components/ui/input";
-import { Alert, ErrorState, Skeleton } from "../components/ui/feedback";
+import { SplitPane } from "../components/ui/split";
+import { Alert, ErrorState } from "../components/ui/feedback";
 import { Tabs } from "../components/ui/tabs";
-import { AgentChatPanel } from "../components/agent/AgentChatPanel";
-import { PolicyAuthorPanel } from "../components/agent/PolicyAuthorPanel";
+import { AgentPanel } from "../components/agent/AgentPanel";
 import { PolicyEnglishPanel } from "../components/policy/PolicyEnglishPanel";
 import { PolicyHistoryPanel } from "../components/policy/PolicyHistoryPanel";
 import { PolicyMetadataPanel } from "../components/policy/PolicyMetadataPanel";
 import { PolicySyncBanner } from "../components/policy/PolicySyncBanner";
+import { PolicyTestsPanel } from "../components/policy/PolicyTestsPanel";
 import { TierBadge } from "../components/safety/TierBadge";
 import { useAutoSize } from "../lib/useAutoSize";
 import api from "../services/api";
+import { useAgentStore } from "../store/agentStore";
 import { usePolicyStore } from "../store/policyStore";
 import { toast } from "../store/toastStore";
 
@@ -55,11 +59,50 @@ const SAMPLE_INPUT = JSON.stringify(
 
 type PanelTab =
   | "metadata"
+  | "agent"
+  | "tests"
   | "history"
   | "english"
-  | "playground"
-  | "author"
-  | "ask";
+  | "playground";
+
+/**
+ * Whether the Rego is on screen.
+ *
+ * Off by default. Most people arrive here to ask what a policy does or to
+ * describe a change, and for them a half-width wall of Rego is the least useful
+ * thing on the page. The code is one click away, it reappears on its own when a
+ * proposal needs reviewing, and the preference sticks, so anyone who does read
+ * Rego turns it on once.
+ */
+const SHOW_CODE_KEY = "sentinel.policyEditor.showCode";
+
+/** The code pane's share of the width when the code is shown. */
+const SPLIT_KEY = "sentinel.policyEditor.split";
+
+function readShowCode(): boolean {
+  try {
+    return window.localStorage.getItem(SHOW_CODE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function readSplit(): number {
+  try {
+    const stored = Number(window.localStorage.getItem(SPLIT_KEY));
+    return Number.isFinite(stored) && stored >= 0.2 && stored <= 0.8 ? stored : 0.5;
+  } catch {
+    return 0.5;
+  }
+}
+
+function remember(key: string, value: string) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    /* A browser refusing storage should not stop the control working. */
+  }
+}
 
 /**
  * Its own component so the auto-sizing runs when the tab is actually opened.
@@ -131,29 +174,40 @@ function PlaygroundPanel({
 
 export default function PolicyEditor() {
   const store = usePolicyStore();
+  const setComposerDraft = useAgentStore((s) => s.setComposerDraft);
+  const { policyName } = useParams<{ policyName: string }>();
   const [panel, setPanel] = useState<PanelTab>("metadata");
-  const [filter, setFilter] = useState("");
   const [inputJson, setInputJson] = useState(SAMPLE_INPUT);
   const [outputJson, setOutputJson] = useState("{}");
   const [evaluating, setEvaluating] = useState(false);
   const [prUrl, setPrUrl] = useState<string | null>(null);
+  const [showCode, setShowCode] = useState(readShowCode);
+  const [split, setSplit] = useState(readSplit);
+
+  const toggleCode = (next: boolean) => {
+    setShowCode(next);
+    remember(SHOW_CODE_KEY, String(next));
+  };
+
+  const resize = (next: number) => {
+    setSplit(next);
+    remember(SPLIT_KEY, String(next));
+  };
 
   useEffect(() => {
     void store.loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The URL is the selection. A scaffolded policy arrives with its draft
+  // already seeded by the dashboard and has nothing committed to fetch, so
+  // asking for it would 404 — hence the check against what is already open.
   useEffect(() => {
-    if (!store.selectedName && store.files.length) {
-      void store.select(store.files[0]);
-    }
+    if (!policyName) return;
+    if (store.selectedName === policyName) return;
+    void store.select(policyName);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store.files, store.selectedName]);
-
-  const visibleFiles = useMemo(
-    () => store.files.filter((f) => f.toLowerCase().includes(filter.toLowerCase())),
-    [store.files, filter],
-  );
+  }, [policyName]);
 
   const dirty = store.isDirty();
   const maxTier = store.metadata?.max_tier ?? 0;
@@ -191,14 +245,150 @@ export default function PolicyEditor() {
     return <ErrorState message={store.error} onRetry={() => void store.loadAll()} />;
   }
 
+  const codePane = (
+    <Card className="flex min-h-0 w-full flex-col overflow-hidden">
+      <CardHeader className="flex-row items-center justify-between py-2.5">
+        <CardTitle className="truncate font-mono text-xs">
+          {store.selectedName ?? "No policy selected"}
+        </CardTitle>
+        <div className="flex shrink-0 items-center gap-2">
+          {dirty && <Badge variant="warning">unsaved</Badge>}
+          {store.metadata && (
+            <Badge variant="outline">{store.metadata.rule_count} rules</Badge>
+          )}
+        </div>
+      </CardHeader>
+      <div className="min-h-0 flex-1">
+        <Editor
+          height="100%"
+          language="rego"
+          theme="vs-dark"
+          value={store.content}
+          onChange={(value) => store.setContent(value ?? "")}
+          options={MONACO_OPTIONS}
+        />
+      </div>
+    </Card>
+  );
+
+  const panelPane = (
+    <Card className="flex min-h-0 w-full flex-col overflow-hidden">
+      <Tabs
+        value={panel}
+        onChange={(id) => setPanel(id as PanelTab)}
+        items={[
+          { id: "metadata", label: "Metadata", count: store.metadata?.rule_count },
+          { id: "agent", label: "Assistant" },
+          { id: "tests", label: "Tests" },
+          { id: "english", label: "Plain English" },
+          { id: "history", label: "History", count: store.revisions.length },
+          { id: "playground", label: "Playground" },
+        ]}
+      />
+
+      {/* Not scrollable here: the panels that need to scroll do it inside
+          themselves, and the ones showing an editor need a bounded height to
+          size against rather than an ancestor that grows to fit them. */}
+      <div className="min-h-0 flex-1">
+        {panel === "metadata" && (
+          <div className="h-full overflow-y-auto">
+            <PolicyMetadataPanel
+              metadata={store.metadata}
+              dirty={dirty}
+              onAddRule={(seed) => {
+                setComposerDraft(seed);
+                setPanel("agent");
+              }}
+            />
+          </div>
+        )}
+
+        {panel === "agent" && (
+          <div className="h-full p-3">
+            <AgentPanel
+              policyName={store.selectedName ?? undefined}
+              currentContent={store.content}
+              onApply={(content, name) => {
+                // Into the editor as an unsaved change, so a proposal goes
+                // through the same validate-and-PR path a hand-written edit
+                // does.
+                if (name !== store.selectedName && store.files.includes(name)) {
+                  void store.select(name).then(() => store.setContent(content));
+                } else {
+                  store.setContent(content);
+                }
+                // The one moment the Rego is worth looking at, so it comes
+                // back whether or not the user keeps it on.
+                toggleCode(true);
+              }}
+            />
+          </div>
+        )}
+
+        {panel === "tests" && (
+          <PolicyTestsPanel
+            policyName={store.selectedName ?? undefined}
+            resourceType={store.metadata?.resource_type}
+            ruleIds={store.metadata?.rules.map((r) => r.id) ?? []}
+          />
+        )}
+
+        {panel === "english" && store.selectedName && (
+          <div className="h-full overflow-y-auto">
+            <PolicyEnglishPanel
+              policyName={store.selectedName}
+              content={store.content}
+              committedContent={store.committedContent}
+            />
+          </div>
+        )}
+
+        {panel === "history" && (
+          <PolicyHistoryPanel
+            revisions={store.revisions}
+            available={store.historyAvailable}
+            uncommitted={store.metadata?.uncommitted_changes}
+            policyName={store.selectedName ?? undefined}
+            currentContent={store.content}
+            onView={store.loadRevision}
+            onRestore={store.restoreFromGit}
+          />
+        )}
+
+        {panel === "playground" && (
+          <PlaygroundPanel
+            input={inputJson}
+            onInputChange={setInputJson}
+            output={outputJson}
+            evaluating={evaluating}
+            disabled={!store.selectedName}
+            onEvaluate={() => void evaluate()}
+          />
+        )}
+      </div>
+    </Card>
+  );
+
   return (
     <div className="mx-auto flex h-full max-w-[1700px] flex-col gap-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold text-content">Policy Editor</h1>
-          <p className="mt-1 text-xs text-content-muted">
-            Policies live in git and change by pull request. Everything ships at
-            Tier 1 — escalating a rule is a deliberate edit.
+        <div className="min-w-0 flex-1">
+          <Link
+            to="/policies"
+            className="inline-flex items-center gap-1.5 text-2xs text-content-subtle hover:text-content"
+          >
+            <ArrowLeft className="size-3.5" />
+            All policies
+          </Link>
+          <h1 className="mt-1 flex items-center gap-2 truncate text-lg font-semibold text-content">
+            <span className="truncate font-mono">
+              {(policyName ?? "").replace(/\.rego$/, "") || "Policy Editor"}
+            </span>
+            {maxTier >= 2 && <TierBadge tier={maxTier} />}
+          </h1>
+          <p className="mt-1 truncate text-xs text-content-muted">
+            {store.metadata?.title ??
+              "Policies live in git and change by pull request."}
           </p>
         </div>
 
@@ -216,6 +406,14 @@ export default function PolicyEditor() {
               </button>
             </span>
           )}
+          <Button
+            variant={showCode ? "secondary" : "ghost"}
+            onClick={() => toggleCode(!showCode)}
+            aria-pressed={showCode}
+          >
+            <Code2 />
+            {showCode ? "Hide code" : "Show code"}
+          </Button>
           <Button
             variant="secondary"
             onClick={() => void store.validate()}
@@ -281,6 +479,32 @@ export default function PolicyEditor() {
         </Alert>
       )}
 
+      {/* Deliberately not folded into the error above. A compile error stops
+          you; this does not, and that is what makes it dangerous — the policy
+          saves, merges, and reports everything as compliant forever. */}
+      {store.validation?.warnings && store.validation.warnings.length > 0 && (
+        <Alert
+          tone="warning"
+          title="This compiles, but some rules can never fire"
+        >
+          <p className="mb-1.5">
+            Rego treats a reference to a field that was never collected as
+            simply not matching, so these rules pass every resource and nothing
+            reports an error.
+          </p>
+          <ul className="list-disc space-y-0.5 pl-4">
+            {store.validation.warnings.map((warning) => (
+              <li key={warning.field}>
+                <code className="font-mono">
+                  input.resource.{warning.field}
+                </code>{" "}
+                is not collected for {warning.resource_type}.
+              </li>
+            ))}
+          </ul>
+        </Alert>
+      )}
+
       {maxTier >= 2 && (
         <Alert
           tone={maxTier >= 3 ? "enforcement" : "warning"}
@@ -292,150 +516,17 @@ export default function PolicyEditor() {
         </Alert>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-12 gap-4">
-        {/* Policy list */}
-        <Card className="col-span-12 flex flex-col overflow-hidden lg:col-span-2">
-          <div className="border-b border-border p-2">
-            <Input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter policies"
-              className="h-7 text-2xs"
-            />
-          </div>
-          <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
-            {store.loading && !store.files.length
-              ? Array.from({ length: 8 }).map((_, i) => (
-                  <Skeleton key={i} className="h-7 w-full" />
-                ))
-              : visibleFiles.map((file) => {
-                  const meta = store.registry?.policies.find((p) => p.name === file);
-                  const active = file === store.selectedName;
-                  return (
-                    <button
-                      key={file}
-                      type="button"
-                      onClick={() => void store.select(file)}
-                      className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-2xs transition-colors ${
-                        active
-                          ? "bg-accent-subtle text-accent"
-                          : "text-content-muted hover:bg-surface-raised hover:text-content"
-                      }`}
-                    >
-                      <span className="min-w-0 flex-1 truncate">
-                        {file.replace(/\.rego$/, "")}
-                      </span>
-                      {meta && meta.max_tier >= 2 && (
-                        <TierBadge tier={meta.max_tier} showLabel={false} />
-                      )}
-                    </button>
-                  );
-                })}
-          </nav>
-        </Card>
-
-        {/* Editor */}
-        <Card className="col-span-12 flex min-h-[520px] flex-col overflow-hidden lg:col-span-6">
-          <CardHeader className="flex-row items-center justify-between py-2.5">
-            <CardTitle className="font-mono text-xs">
-              {store.selectedName ?? "No policy selected"}
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              {dirty && <Badge variant="warning">unsaved</Badge>}
-              {store.metadata && (
-                <Badge variant="outline">{store.metadata.rule_count} rules</Badge>
-              )}
-            </div>
-          </CardHeader>
-          <div className="min-h-0 flex-1">
-            <Editor
-              height="100%"
-              language="rego"
-              theme="vs-dark"
-              value={store.content}
-              onChange={(value) => store.setContent(value ?? "")}
-              options={MONACO_OPTIONS}
-            />
-          </div>
-        </Card>
-
-        {/* Side panel */}
-        <Card className="col-span-12 flex min-h-[520px] flex-col overflow-hidden lg:col-span-4">
-          <Tabs
-            value={panel}
-            onChange={(id) => setPanel(id as PanelTab)}
-            items={[
-              { id: "metadata", label: "Metadata", count: store.metadata?.rule_count },
-              { id: "history", label: "History", count: store.revisions.length },
-              { id: "english", label: "Plain English" },
-              { id: "playground", label: "Playground" },
-              { id: "author", label: "Draft" },
-              { id: "ask", label: "Ask" },
-            ]}
-          />
-
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {panel === "metadata" && (
-              <PolicyMetadataPanel metadata={store.metadata} dirty={dirty} />
-            )}
-
-            {panel === "history" && (
-              <PolicyHistoryPanel
-                revisions={store.revisions}
-                available={store.historyAvailable}
-                uncommitted={store.metadata?.uncommitted_changes}
-                policyName={store.selectedName ?? undefined}
-                onView={store.loadRevision}
-                onRestore={store.restoreFromGit}
-              />
-            )}
-
-            {panel === "english" && store.selectedName && (
-              <PolicyEnglishPanel
-                policyName={store.selectedName}
-                content={store.content}
-              />
-            )}
-
-            {panel === "playground" && (
-              <PlaygroundPanel
-                input={inputJson}
-                onInputChange={setInputJson}
-                output={outputJson}
-                evaluating={evaluating}
-                disabled={!store.selectedName}
-                onEvaluate={() => void evaluate()}
-              />
-            )}
-
-            {panel === "author" && (
-              <PolicyAuthorPanel
-                policyName={store.selectedName ?? undefined}
-                currentContent={store.content}
-                onApply={(content, name) => {
-                  // Into the editor as an unsaved change, so the draft goes
-                  // through the same validate-and-save path a hand-written
-                  // edit does.
-                  if (name !== store.selectedName && store.files.includes(name)) {
-                    void store.select(name).then(() => store.setContent(content));
-                  } else {
-                    store.setContent(content);
-                  }
-                  setPanel("metadata");
-                }}
-              />
-            )}
-
-            {panel === "ask" && (
-              <div className="h-full p-3">
-                <AgentChatPanel
-                  contextNote={store.selectedName ?? undefined}
-                />
-              </div>
-            )}
-          </div>
-        </Card>
-      </div>
+      {showCode ? (
+        <SplitPane
+          className="min-h-[520px] flex-1"
+          ratio={split}
+          onRatioChange={resize}
+          left={codePane}
+          right={panelPane}
+        />
+      ) : (
+        <div className="flex min-h-[520px] min-w-0 flex-1">{panelPane}</div>
+      )}
 
       {store.registry && store.registry.summary.max_tier <= 1 && (
         <p className="flex items-center gap-1.5 text-2xs text-content-subtle">

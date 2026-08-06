@@ -1,0 +1,36 @@
+{
+  "description": "A cluster that stopped 120 days ago. CST-CLU-005 fires on `idle_days`, which the handler now derives from `terminated_time` -- the one resource type whose idleness the workspace API states outright rather than implying from an edit timestamp.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "0101-000000-aaaa",
+    "name": "analytics",
+    "type": "cluster",
+    "owner": "analytics@company.com",
+    "state": "TERMINATED",
+    "cluster_type": "interactive",
+    "access_mode": "USER_ISOLATION",
+    "autotermination_minutes": 30,
+    "policy_id": "E0123456789",
+    "num_workers": 2,
+    "autoscale_max_workers": null,
+    "idle_days": 120,
+    "tags": {
+      "cost-center": "CC-4100",
+      "owner": "data-platform@company.com"
+    }
+  },
+  "expect": {
+    "fires": [
+      "CST-CLU-005"
+    ],
+    "passes": [
+      "CST-CLU-003",
+      "CST-CLU-004",
+      "CTL-CLU-002",
+      "SEC-CLU-001"
+    ]
+  }
+}

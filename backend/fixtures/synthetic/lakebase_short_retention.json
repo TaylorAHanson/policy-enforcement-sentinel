@@ -1,0 +1,29 @@
+{
+  "description": "Three days of recovery window in production, which is what CTL-LKB-002 is actually for.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "lb-prod",
+    "name": "lb-prod",
+    "type": "lakebase_instance",
+    "owner": "data-platform@company.com",
+    "state": "AVAILABLE",
+    "capacity": "CU_2",
+    "capacity_units": 2,
+    "stopped": false,
+    "retention_window_days": 3,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CTL-LKB-002"
+    ],
+    "passes": [
+      "CST-LKB-001",
+      "CST-LKB-003",
+      "CTL-LKB-004"
+    ]
+  }
+}

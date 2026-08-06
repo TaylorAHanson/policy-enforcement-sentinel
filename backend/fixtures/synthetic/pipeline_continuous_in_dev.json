@@ -1,0 +1,32 @@
+{
+  "description": "A continuous pipeline outside production, which bills around the clock for a development workload. Same corrected path as above.",
+  "workspace": "synthetic-dev",
+  "workspace_type": "enterprise",
+  "environment": "dev",
+  "source": "authored",
+  "resource": {
+    "id": "pl-001",
+    "name": "bronze-to-silver",
+    "type": "pipeline",
+    "owner": "svc-etl@company.com",
+    "serverless": true,
+    "continuous": true,
+    "channel": "CURRENT",
+    "development": true,
+    "owner_type": "service_principal",
+    "target_catalog": "prod",
+    "metadata_complete": true,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CST-PIP-005"
+    ],
+    "passes": [
+      "CST-PIP-001",
+      "CTL-PIP-002",
+      "CTL-PIP-003",
+      "SEC-PIP-004"
+    ]
+  }
+}

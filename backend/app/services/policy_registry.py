@@ -78,6 +78,12 @@ class PolicyDescriptor:
     resource_type: str = ""
     authors: List[str] = field(default_factory=list)
     rules: List[RuleDescriptor] = field(default_factory=list)
+    #: Package names this policy was previously known by, from
+    #: ``custom.replaces``. A rename records itself here rather than in a
+    #: side-car table, so the file explains its own history and the alias
+    #: travels with the policy through sync — allowlist entries and saved
+    #: filters naming the old spelling keep resolving without a redeploy.
+    replaces: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -210,6 +216,21 @@ def _annotation_index(inspection: Dict[str, Any]) -> Dict[str, dict]:
     return index
 
 
+def _replaces(custom: dict) -> List[str]:
+    """Former package names declared in ``custom.replaces``.
+
+    Accepts a bare string as well as a list, because a policy renamed once will
+    be hand-edited eventually and writing a single name without brackets is the
+    obvious mistake to forgive.
+    """
+    declared = custom.get("replaces")
+    if not declared:
+        return []
+    if isinstance(declared, str):
+        declared = [declared]
+    return [str(name).strip() for name in declared if str(name).strip()]
+
+
 def _authors(annotations: dict) -> List[str]:
     result = []
     for author in annotations.get("authors") or []:
@@ -292,6 +313,7 @@ def _build(policies_dir: str) -> List[PolicyDescriptor]:
                 resource_type=str(custom.get("resource_type") or ""),
                 authors=_authors(annotations),
                 rules=rules,
+                replaces=_replaces(custom),
             )
         )
 
@@ -331,6 +353,21 @@ def load_policies(policies_dir: Optional[str] = None, *, force: bool = False) ->
     return built
 
 
+def declared_aliases(policies_dir: Optional[str] = None) -> Dict[str, List[str]]:
+    """Former name -> current package, as declared by the policies themselves.
+
+    Read from each policy's ``custom.replaces``. Kept separate from the static
+    table in ``legacy_names`` because that one records a historical restructure
+    and this one records renames made since, which arrive by pull request and
+    must not require a code change to take effect.
+    """
+    aliases: Dict[str, List[str]] = {}
+    for policy in load_policies(policies_dir):
+        for former in policy.replaces:
+            aliases.setdefault(former, []).append(policy.package)
+    return aliases
+
+
 def get_policy(name: str, policies_dir: Optional[str] = None) -> Optional[PolicyDescriptor]:
     """Look up one policy by file name or package name."""
     from app.providers.opa.legacy_names import resolve_policy_name
@@ -339,8 +376,16 @@ def get_policy(name: str, policies_dir: Optional[str] = None) -> Optional[Policy
     if target.endswith(".rego"):
         target = target[: -len(".rego")]
 
-    candidates = resolve_policy_name(target)
     policies = load_policies(policies_dir)
+
+    # A live policy wins over any alias. Without this, a policy that took the
+    # name of a retired one would be shadowed by the redirect.
+    for policy in policies:
+        if policy.package == target or policy.name == f"{target}.rego":
+            return policy
+
+    candidates = list(resolve_policy_name(target))
+    candidates.extend(declared_aliases(policies_dir).get(target, []))
     for candidate in candidates:
         for policy in policies:
             if policy.package == candidate or policy.name == f"{candidate}.rego":

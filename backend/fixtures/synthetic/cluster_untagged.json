@@ -1,0 +1,33 @@
+{
+  "description": "No cost tags, so the spend cannot be attributed and there is nobody to notify.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "0101-000000-aaaa",
+    "name": "analytics",
+    "type": "cluster",
+    "owner": "analytics@company.com",
+    "state": "RUNNING",
+    "cluster_type": "interactive",
+    "access_mode": "USER_ISOLATION",
+    "autotermination_minutes": 30,
+    "policy_id": "E0123456789",
+    "num_workers": 2,
+    "autoscale_max_workers": null,
+    "idle_days": 0,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CST-CLU-003"
+    ],
+    "passes": [
+      "CST-CLU-004",
+      "CST-CLU-005",
+      "CTL-CLU-002",
+      "SEC-CLU-001"
+    ]
+  }
+}

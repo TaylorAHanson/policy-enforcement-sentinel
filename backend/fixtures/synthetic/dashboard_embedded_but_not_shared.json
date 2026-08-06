@@ -1,0 +1,27 @@
+{
+  "description": "Embedded credentials alone are not the problem. Removing the broad share must clear SEC-DSH-001, or the rule is really just 'is it published'.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "dsh-001",
+    "name": "Revenue overview",
+    "type": "dashboard",
+    "owner": "analytics@company.com",
+    "uses_embedded_credentials": true,
+    "is_published": true,
+    "shared_with": [
+      "data-analysts"
+    ],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [],
+    "passes": [
+      "CTL-DSH-002",
+      "CTL-DSH-003",
+      "SEC-DSH-001"
+    ]
+  }
+}

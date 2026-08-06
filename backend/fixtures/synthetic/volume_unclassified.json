@@ -1,0 +1,27 @@
+{
+  "description": "No classification tag, so it is unknown whether this volume holds personal data.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "prod.raw.landing",
+    "name": "landing",
+    "type": "storage",
+    "owner": "data-platform@company.com",
+    "storage_type": "MANAGED",
+    "catalog": "prod",
+    "schema": "raw",
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CTL-VOL-003"
+    ],
+    "passes": [
+      "CTL-VOL-004",
+      "SEC-VOL-001",
+      "SEC-VOL-002"
+    ]
+  }
+}

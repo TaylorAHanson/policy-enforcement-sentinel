@@ -28,5 +28,7 @@ export {
   ErrorState,
 } from "./feedback";
 export { Dialog, ConfirmPhraseDialog } from "./dialog";
+export { Combobox, type ComboboxOption } from "./combobox";
+export { SplitPane } from "./split";
 export { Tabs, type TabItem } from "./tabs";
 export { Pagination } from "./pagination";

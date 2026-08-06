@@ -1,0 +1,30 @@
+{
+  "description": "The same privilege as the fixture above, arriving in `entitlements` instead. The rule is written twice, once against each field, because which one is populated depends on how the client was configured rather than on anything about the principal.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "sp-99",
+    "name": "svc-etl",
+    "type": "service_principal",
+    "owner": "svc-etl",
+    "active": true,
+    "application_id": "abc-123",
+    "entitlements": [
+      "account_admin"
+    ],
+    "roles": [],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "SEC-SPN-002"
+    ],
+    "passes": [
+      "CTL-SPN-003",
+      "SEC-SPN-001",
+      "SEC-SPN-004"
+    ]
+  }
+}

@@ -201,6 +201,49 @@ def test_a_trailing_slash_on_the_host_does_not_double_up(monkeypatch):
     assert client._resolve_credentials()[0] == HOST
 
 
+BARE_HOST = "adb-2548836972759138.18.azuredatabricks.net"
+
+
+def test_a_host_without_a_scheme_is_still_a_usable_url(monkeypatch):
+    """A deployed App is handed DATABRICKS_HOST as a bare hostname.
+
+    The SDK prepends https:// itself, so every WorkspaceClient path works and
+    this stays invisible until something builds a URL by hand — where httpx
+    refuses it for having no protocol, and the assistant fails in a deployment
+    that works locally.
+    """
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "MODEL_SERVING_API_KEY", "")
+    client = ModelServingClient(host=BARE_HOST, token="t")
+
+    assert client._resolve_credentials()[0] == f"https://{BARE_HOST}"
+
+
+def test_the_settings_host_is_qualified_wherever_it_came_from(monkeypatch):
+    """Assignment is validated too, so a bare host from the Settings page or a
+    test double is normalised the same way one from the environment is."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DATABRICKS_HOST", BARE_HOST)
+
+    assert settings.DATABRICKS_HOST == f"https://{BARE_HOST}"
+
+
+def test_routes_built_from_a_bare_host_carry_a_protocol(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "MODEL_SERVING_API_KEY", "")
+    client = ModelServingClient(
+        host=BARE_HOST, token="t", gateway_model="system.ai.gpt-5-6-luna"
+    )
+    host, _ = client._resolve_credentials()
+
+    for _label, url, _model in client._routes(host):
+        assert url.startswith("https://")
+        assert httpx.URL(url).host == BARE_HOST
+
+
 def test_a_service_principal_is_passed_to_the_sdk(monkeypatch):
     """Non-expiring credentials, so they must not be dropped in favour of the
     ambient chain."""

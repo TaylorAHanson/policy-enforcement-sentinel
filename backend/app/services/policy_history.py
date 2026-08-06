@@ -161,6 +161,55 @@ def list_revisions(
     return revisions
 
 
+def last_edits(policies_dir: str, policy_names: List[str]) -> dict:
+    """The most recent commit touching each policy, in a single git pass.
+
+    A dashboard listing every policy needs one row of history each, and calling
+    :func:`list_revisions` per file would be a git subprocess per policy — on
+    fourteen policies that is fourteen process spawns for the first paint.
+
+    One ``git log --name-only`` over the whole directory gives the same answer,
+    walking the log once and taking the first commit seen for each path. Returns
+    an empty mapping rather than raising when history is unavailable, because a
+    dashboard missing a "last edited" column is still a usable dashboard.
+    """
+    wanted = {_safe_policy_name(name) for name in policy_names if name}
+    if not wanted:
+        return {}
+
+    try:
+        root = _repo_root(policies_dir)
+        rel_dir = os.path.relpath(os.path.abspath(policies_dir), root)
+        fmt = _SEP.join(["%H", "%h", "%an", "%ae", "%aI", "%s"])
+        output = _run_git(
+            # A commit prefix, then the paths it touched, then a blank line.
+            ["log", "--max-count=400", f"--format=%x00{fmt}", "--name-only", "--", rel_dir],
+            cwd=root,
+        )
+    except (GitUnavailable, ValueError, OSError) as e:
+        logger.debug("Bulk policy history unavailable: %s", e)
+        return {}
+
+    found: dict = {}
+    current: Optional[PolicyRevision] = None
+
+    for line in output.splitlines():
+        if line.startswith("\x00"):
+            parts = line[1:].split(_SEP)
+            current = PolicyRevision(*parts) if len(parts) == 6 else None
+            continue
+
+        name = os.path.basename(line.strip())
+        # First commit seen for a path is the newest, since the log is ordered.
+        if current and name in wanted and name not in found:
+            found[name] = current.to_dict()
+
+        if len(found) == len(wanted):
+            break
+
+    return found
+
+
 def get_revision_content(policies_dir: str, policy_name: str, sha: str) -> str:
     """The policy's full text as of one commit."""
     root, rel_path = _relative_path(policies_dir, policy_name)

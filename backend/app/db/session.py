@@ -47,9 +47,17 @@ def reset_database_connection():
 
 
 def _ensure_databricks_host_scheme() -> None:
+    """Qualify the host in the environment, for libraries that read it directly.
+
+    ``settings.DATABRICKS_HOST`` is already normalised by a validator, but the
+    environment it was read from is not, and anything reaching for os.environ
+    sees the bare hostname a deployed App was given.
+    """
+    from app.core.config import qualify_host
+
     env_host = os.environ.get("DATABRICKS_HOST", "")
-    if env_host and not env_host.startswith("http"):
-        os.environ["DATABRICKS_HOST"] = f"https://{env_host}"
+    if env_host:
+        os.environ["DATABRICKS_HOST"] = qualify_host(env_host) or env_host
 
 
 def get_lakebase_token(endpoint_path: Optional[str] = None) -> Optional[str]:

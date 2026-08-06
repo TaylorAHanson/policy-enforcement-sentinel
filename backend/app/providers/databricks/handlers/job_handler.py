@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List
 
-from app.providers.databricks import destructive, permissions
+from app.providers.databricks import activity, destructive, identity, permissions
 from app.providers.databricks.handlers.base import (
     BaseResourceHandler,
     SupportsDelete,
@@ -25,32 +25,71 @@ class JobResourceHandler(
 
     resource_type = "job"
 
+    discovered_fields = {
+        "id": "The job ID, as a string.",
+        "name": "The job name, or null.",
+        "type": 'Always "job".',
+        "owner": "The email of whoever created the job.",
+        "schedule": "The Quartz cron expression, or null when the job has no schedule.",
+        "paused": "Whether the schedule is paused. False when there is no schedule at all.",
+        "max_concurrent_runs": "Concurrency limit, or null.",
+        "owner_type": (
+            '"user", "service_principal", or "unknown" when the API named '
+            "neither. Describes who the job runs as, not who created it — a job "
+            "created by a person and running as a service principal is fine."
+        ),
+        "idle_days": (
+            "Days since the job last ran. Absent for a job that has never run, "
+            "which is not the same as an idle one, and absent when the run "
+            "history could not be read."
+        ),
+        "failed_consecutively_days": (
+            "How long the current unbroken run of failures has lasted. Absent "
+            "unless the most recent finished run failed, so a job that failed "
+            "for a month and was fixed reports nothing."
+        ),
+        "tags": "Job tags as a string map.",
+    }
+
     async def discover(self) -> List[Dict[str, Any]]:
+        jobs = list(self.workspace_client.jobs.list(expand_tasks=False))
+
+        # Run history is a second call per job, so it happens once for the whole
+        # set with bounded concurrency rather than inline in the loop.
+        history = await activity.job_run_history(
+            self.workspace_client, [job.job_id for job in jobs]
+        )
+
         resources = []
-        for job in self.workspace_client.jobs.list(expand_tasks=False):
+        for job in jobs:
             settings_obj = getattr(job, "settings", None)
             schedule = getattr(settings_obj, "schedule", None) if settings_obj else None
-            resources.append(
-                {
-                    "id": str(job.job_id),
-                    "name": getattr(settings_obj, "name", None) if settings_obj else None,
-                    "type": "job",
-                    "owner": getattr(job, "creator_user_name", "unknown"),
-                    "schedule": getattr(schedule, "quartz_cron_expression", None)
+            resource = {
+                "id": str(job.job_id),
+                "name": getattr(settings_obj, "name", None) if settings_obj else None,
+                "type": "job",
+                "owner": getattr(job, "creator_user_name", "unknown"),
+                "schedule": getattr(schedule, "quartz_cron_expression", None)
+                if schedule
+                else None,
+                "paused": (
+                    str(getattr(schedule, "pause_status", "")).upper().endswith("PAUSED")
                     if schedule
-                    else None,
-                    "paused": (
-                        str(getattr(schedule, "pause_status", "")).upper().endswith("PAUSED")
-                        if schedule
-                        else False
-                    ),
-                    "max_concurrent_runs": getattr(settings_obj, "max_concurrent_runs", None)
-                    if settings_obj
-                    else None,
-                    "tags": dict(getattr(settings_obj, "tags", None) or {})
-                    if settings_obj
-                    else {},
-                }
+                    else False
+                ),
+                "max_concurrent_runs": getattr(settings_obj, "max_concurrent_runs", None)
+                if settings_obj
+                else None,
+                "owner_type": identity.owner_type(
+                    getattr(settings_obj, "run_as", None) if settings_obj else None,
+                    getattr(job, "creator_user_name", None),
+                ),
+                "tags": dict(getattr(settings_obj, "tags", None) or {})
+                if settings_obj
+                else {},
+            }
+            resources.append(
+                activity.merge_known(resource, history.get(str(job.job_id), {}))
             )
         return resources
 

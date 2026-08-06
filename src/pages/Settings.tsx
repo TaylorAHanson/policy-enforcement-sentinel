@@ -6,6 +6,7 @@ import {
   Braces,
   CalendarClock,
   Check,
+  GitBranch,
   ListOrdered,
   Palette,
   RotateCcw,
@@ -14,6 +15,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
 import {
   Card,
   CardContent,
@@ -42,6 +44,7 @@ const LADDER_ID = "__action_ladder__";
 const GROUP_ICONS: Record<string, typeof ShieldAlert> = {
   "Enforcement safety": ShieldAlert,
   Scanning: ScanLine,
+  GitHub: GitBranch,
   Agent: Bot,
   Branding: Palette,
   Notifications: Bell,
@@ -370,6 +373,71 @@ function DangerGroup({
   );
 }
 
+/**
+ * A write-only credential field.
+ *
+ * The current value is never fetched, so there is nothing to pre-fill and no
+ * point offering a reveal: the server does not send it. What the page can say
+ * is whether one is configured and which one, from the last four characters —
+ * enough to tell two tokens apart without putting either in a browser.
+ */
+function SecretControl({
+  field,
+  disabled,
+  onSubmit,
+}: {
+  field: SettingDefinition;
+  disabled: boolean;
+  onSubmit: (value: string) => void;
+}) {
+  const [entry, setEntry] = useState("");
+
+  const submit = () => {
+    const value = entry.trim();
+    if (!value) return;
+    onSubmit(value);
+    setEntry("");
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        {field.configured ? (
+          <Badge variant="success">configured</Badge>
+        ) : (
+          <Badge variant="outline">not set</Badge>
+        )}
+        {field.hint && (
+          <code className="font-mono text-2xs text-content-subtle">
+            {field.hint}
+          </code>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Input
+          type="password"
+          value={entry}
+          disabled={disabled}
+          autoComplete="off"
+          placeholder={field.configured ? "Enter a new value to replace" : "Paste the token"}
+          className="max-w-[280px] font-mono"
+          onChange={(e) => setEntry(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+        />
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={submit}
+          disabled={disabled || !entry.trim()}
+        >
+          Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 const CRON_EXAMPLES: Array<{ expression: string; label: string }> = [
   { expression: "0 2 * * *", label: "Daily at 02:00" },
   { expression: "0 2 * * 1", label: "Mondays at 02:00" },
@@ -554,6 +622,15 @@ function SettingRow({
               const parsed = Number(draft);
               if (Number.isFinite(parsed) && parsed !== field.value) onChange(parsed);
             }}
+          />
+        );
+
+      case "secret":
+        return (
+          <SecretControl
+            field={field}
+            disabled={saving}
+            onSubmit={(value) => onChange(value)}
           />
         );
 

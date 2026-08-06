@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List
 
-from app.providers.databricks import uc_metadata
+from app.providers.databricks import activity, uc_metadata
 from app.providers.databricks.handlers.base import (
     BaseResourceHandler,
     SupportsCertification,
@@ -27,6 +27,36 @@ class DatasetResourceHandler(BaseResourceHandler, SupportsCertification, Support
 
     resource_type = "dataset"
 
+    discovered_fields = {
+        "id": "The three-level full name, catalog.schema.table.",
+        "name": "The table name.",
+        "type": 'Always "dataset".',
+        "owner": "The Unity Catalog owner.",
+        "catalog": "The containing catalog.",
+        "schema": "The containing schema.",
+        "table_type": "MANAGED, EXTERNAL, VIEW and so on.",
+        "has_description": "Whether the table comment is non-empty.",
+        "certified": "Whether the certification tag is set.",
+        "quarantined": "Whether the quarantine tag is set.",
+        "last_altered": "Timestamp of the last change, as a string. May be empty.",
+        "idle_days": (
+            "Days since the table was last **written to**, from `last_altered`. "
+            "Note this is not days since it was last read — a table queried "
+            "daily but never updated will look idle."
+        ),
+        "all_columns_have_descriptions": (
+            "Whether every column carries a comment. True when the column read "
+            "failed, so a rule about undescribed columns stays quiet rather "
+            "than flagging a table nobody could inspect."
+        ),
+        # Deliberately not collected: `principals` and `grants`. Unity Catalog
+        # only discloses another principal's grants to the object's owner or a
+        # metastore admin, and this scanner is neither. `table_privileges` would
+        # return the scanner's own access and nothing else, making every table
+        # look correctly restricted.
+        "tags": "Unity Catalog tags as a string map.",
+    }
+
     async def discover(self) -> List[Dict[str, Any]]:
         catalogs = [
             catalog.name
@@ -44,21 +74,31 @@ class DatasetResourceHandler(BaseResourceHandler, SupportsCertification, Support
         resources: List[Dict[str, Any]] = []
         for full_name, entry in metadata.items():
             tags = entry.get("tags", {})
+            resource = {
+                "id": full_name,
+                "name": entry.get("name"),
+                "type": "dataset",
+                "owner": entry.get("owner", "unknown"),
+                "catalog": entry.get("catalog"),
+                "schema": entry.get("schema"),
+                "table_type": entry.get("table_type"),
+                "has_description": bool((entry.get("comment") or "").strip()),
+                "certified": str(tags.get(CERTIFICATION_TAG, "")).lower() == "true",
+                "quarantined": str(tags.get(QUARANTINE_TAG, "")).lower() == "true",
+                "last_altered": str(entry.get("last_altered") or ""),
+                # None means the column read failed. True is the safe
+                # reading of "we don't know" for a rule that fires on False.
+                "all_columns_have_descriptions": (
+                    True
+                    if entry.get("all_columns_have_descriptions") is None
+                    else bool(entry["all_columns_have_descriptions"])
+                ),
+                "tags": tags,
+            }
             resources.append(
-                {
-                    "id": full_name,
-                    "name": entry.get("name"),
-                    "type": "dataset",
-                    "owner": entry.get("owner", "unknown"),
-                    "catalog": entry.get("catalog"),
-                    "schema": entry.get("schema"),
-                    "table_type": entry.get("table_type"),
-                    "has_description": bool((entry.get("comment") or "").strip()),
-                    "certified": str(tags.get(CERTIFICATION_TAG, "")).lower() == "true",
-                    "quarantined": str(tags.get(QUARANTINE_TAG, "")).lower() == "true",
-                    "last_altered": str(entry.get("last_altered") or ""),
-                    "tags": tags,
-                }
+                activity.merge_idle_days(
+                    resource, activity.days_since_timestamp(entry.get("last_altered"))
+                )
             )
         return resources
 

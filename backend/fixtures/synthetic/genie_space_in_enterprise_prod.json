@@ -1,0 +1,28 @@
+{
+  "description": "A Genie space in enterprise production. Both firing rules are unconditional in practice: neither a risk review nor a curated table set is collected, so every space in prod looks like this.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "gs-001",
+    "name": "Sales assistant",
+    "type": "genie_space",
+    "owner": "analytics@company.com",
+    "description": "Answers sales questions.",
+    "shared_with": [
+      "sales-team"
+    ],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CTL-GEN-003",
+      "SEC-GEN-001"
+    ],
+    "passes": [
+      "CST-GEN-004",
+      "SEC-GEN-002"
+    ]
+  }
+}

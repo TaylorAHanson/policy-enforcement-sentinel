@@ -120,6 +120,13 @@ class SentinelService:
                         "resource_type": row.resource_type,
                         "status": row.status,
                         "justification": row.justification,
+                        # Defaulted rather than passed through as null. A row
+                        # written before patterns existed waives one named
+                        # resource, and the one thing that must not happen is
+                        # for its absence of a match_type to be read as
+                        # anything broader.
+                        "match_type": getattr(row, "match_type", None) or "resource",
+                        "rule_id": getattr(row, "rule_id", None) or "",
                         # ISO string or JSON null. Rego's `not exception.expires_at`
                         # never matches a JSON null, so common.rego tests for it
                         # explicitly with object.get(..., null).

@@ -7,7 +7,7 @@ the five gates were walked — there is no way to call
 ``clusters.permanent_delete_cluster`` in this codebase without that having
 happened.
 
-The confinement is enforced by ``tests/unit/safety/test_destructive_confinement.py``,
+The confinement is enforced by ``tests/safety/test_destructive_confinement.py``,
 which walks the source tree and fails if any of these SDK methods appear
 elsewhere. If you find yourself wanting to add a destructive call to a handler,
 add it here instead and call it from the handler.

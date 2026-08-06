@@ -1,0 +1,28 @@
+{
+  "description": "A scheduled notebook in /Shared but not under a Git folder, so there is no history of what changed between runs. CTL-NBK-002 stays quiet because the path is not personal -- the two rules overlap and are not the same rule.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "/Shared/etl/bronze",
+    "name": "bronze",
+    "type": "notebook",
+    "owner": "data-platform@company.com",
+    "path": "/Shared/etl/bronze",
+    "language": "PYTHON",
+    "in_shared": true,
+    "in_git_folder": false,
+    "is_scheduled": true,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CTL-NBK-003"
+    ],
+    "passes": [
+      "CTL-NBK-002",
+      "SEC-NBK-001"
+    ]
+  }
+}

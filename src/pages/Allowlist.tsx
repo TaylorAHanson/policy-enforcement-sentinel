@@ -1,265 +1,591 @@
-import { useState, useEffect } from 'react';
-import { ShieldCheck, Plus, Trash2, Search, RefreshCw, X } from 'lucide-react';
-import type { AllowlistEntry } from '../services/api';
+import { useEffect, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 
+import api, {
+  type AllowlistEntry,
+  type AllowlistImpact,
+  type AllowlistMatchType,
+  type PolicyRegistry,
+  type ResourceTypeOption,
+} from "../services/api";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Dialog } from "../components/ui/dialog";
+import { Alert, EmptyState, ErrorState, Spinner } from "../components/ui/feedback";
+import { Field, Input, Label, Select } from "../components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from "../components/ui/table";
+import { cn } from "../lib/utils";
+import { toast } from "../store/toastStore";
+
+/** A sensible default that is still short enough to feel like a real decision. */
+function defaultExpiry(): string {
+  const date = new Date();
+  date.setDate(date.getDate() + 90);
+  return date.toISOString().slice(0, 10);
+}
+
+interface DraftState {
+  match_type: AllowlistMatchType;
+  resource_id: string;
+  resource_type: string;
+  rule_id: string;
+  workspace: string;
+  justification: string;
+  expires_at: string;
+}
+
+const EMPTY_DRAFT: DraftState = {
+  match_type: "resource",
+  resource_id: "",
+  resource_type: "",
+  rule_id: "",
+  workspace: "",
+  justification: "",
+  expires_at: "",
+};
+
+/**
+ * Exceptions to the policies, in two shapes.
+ *
+ * A *resource* exception names one thing and waives every rule that fails for
+ * it. A *pattern* waives one rule for one resource type in one workspace, which
+ * is how people actually think — "service principals are allowed to own jobs in
+ * the sandbox" is a sentence about a class.
+ *
+ * The page leans on the difference rather than hiding it. A pattern covers
+ * resources that do not exist yet, so it is the only kind that can grow after
+ * it is written, and the only kind whose growth is invisible: a suppressed
+ * finding looks exactly like a resource that passed. Hence the count of what
+ * each one is currently hiding, and the compulsory expiry.
+ */
 export default function Allowlist() {
   const [entries, setEntries] = useState<AllowlistEntry[]>([]);
+  const [impact, setImpact] = useState<Record<string, AllowlistImpact>>({});
+  const [resourceTypes, setResourceTypes] = useState<ResourceTypeOption[]>([]);
+  const [registry, setRegistry] = useState<PolicyRegistry | null>(null);
   const [loading, setLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newEntry, setNewEntry] = useState({
-    resource_id: '',
-    resource_type: 'app',
-    workspace: 'ws-enterprise-prod',
-    justification: ''
-  });
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<DraftState>(EMPTY_DRAFT);
 
-  const fetchEntries = async () => {
+  const load = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch('/api/v1/allowlist');
-      const data = await res.json();
-      setEntries(Array.isArray(data) ? data : []);
+      const [rows, types] = await Promise.all([
+        api.allowlist.list(),
+        api.allowlist.resourceTypes(),
+      ]);
+      setEntries(rows);
+      setResourceTypes(types);
     } catch (e) {
-      console.error(e);
-      setEntries([]);
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
+
+    // Both are decoration on a page that works without them, so neither is
+    // allowed to fail the load.
+    void api.allowlist
+      .impact()
+      .then((rows) =>
+        setImpact(Object.fromEntries(rows.map((row) => [row.id, row]))),
+      )
+      .catch(() => setImpact({}));
+    void api.policies
+      .registry()
+      .then(setRegistry)
+      .catch(() => setRegistry(null));
   };
 
   useEffect(() => {
-    fetchEntries();
+    void load();
   }, []);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && showAddModal) {
-        setShowAddModal(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showAddModal]);
+  /** Rules that could be waived, for the type the draft is about. */
+  const rulesForType = useMemo(() => {
+    if (!registry) return [];
+    return registry.policies
+      .filter((policy) => !draft.resource_type || policy.resource_type === draft.resource_type)
+      .flatMap((policy) =>
+        policy.rules.map((rule) => ({
+          id: rule.id,
+          label: `${rule.id} — ${rule.rule}`,
+          policy: policy.name,
+        })),
+      );
+  }, [registry, draft.resource_type]);
 
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return entries;
+    return entries.filter((entry) =>
+      [entry.resource_id, entry.rule_id, entry.resource_type, entry.workspace, entry.justification]
+        .filter(Boolean)
+        .some((field) => String(field).toLowerCase().includes(needle)),
+    );
+  }, [entries, query]);
+
+  const openForm = () => {
+    setDraft({
+      ...EMPTY_DRAFT,
+      // The narrower of the two is the default. Someone who has not thought
+      // about scope yet should get the exception that covers one resource, not
+      // the one that covers a class.
+      match_type: "resource",
+      resource_type: resourceTypes[0]?.value ?? "",
+      expires_at: "",
+    });
+    setAdding(true);
+  };
+
+  /**
+   * Switching scope inside the form.
+   *
+   * A pattern must expire, so moving to one fills the date rather than letting
+   * the form be submitted and rejected. Moving back leaves it alone: a date the
+   * user typed is theirs, and a resource exception is allowed to have one.
+   */
+  const setScope = (match_type: AllowlistMatchType) => {
+    setDraft((current) => ({
+      ...current,
+      match_type,
+      expires_at:
+        match_type === "pattern" && !current.expires_at
+          ? defaultExpiry()
+          : current.expires_at,
+    }));
+  };
+
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
     try {
-      await fetch('/api/v1/allowlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newEntry)
+      await api.allowlist.create({
+        match_type: draft.match_type,
+        resource_type: draft.resource_type,
+        workspace: draft.workspace.trim(),
+        justification: draft.justification.trim(),
+        resource_id: draft.match_type === "resource" ? draft.resource_id.trim() : null,
+        rule_id: draft.match_type === "pattern" ? draft.rule_id : null,
+        expires_at: draft.expires_at ? new Date(draft.expires_at).toISOString() : null,
       });
-      setShowAddModal(false);
-      setNewEntry({ resource_id: '', resource_type: 'app', workspace: 'ws-enterprise-prod', justification: '' });
-      fetchEntries();
+      setAdding(false);
+      toast.success("Exception added");
+      void load();
     } catch (e) {
-      console.error(e);
-      alert('Failed to add entry');
+      toast.error(
+        "Could not add the exception",
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to remove this exception?')) return;
+  const remove = async (entry: AllowlistEntry) => {
+    const covered = impact[entry.id]?.suppressed_findings ?? 0;
+    const what =
+      entry.match_type === "pattern"
+        ? `${entry.rule_id} on every ${entry.resource_type} in ${entry.workspace}`
+        : entry.resource_id;
+
+    if (
+      !confirm(
+        `Remove the exception for ${what}?` +
+          (covered ? `\n\n${covered} finding(s) it is hiding will reappear.` : ""),
+      )
+    ) {
+      return;
+    }
+
     try {
-      await fetch(`/api/v1/allowlist/${id}`, { method: 'DELETE' });
-      fetchEntries();
+      await api.allowlist.remove(entry.id);
+      toast.success("Exception removed");
+      void load();
     } catch (e) {
-      console.error(e);
-      alert('Failed to delete entry');
+      toast.error("Could not remove it", e instanceof Error ? e.message : String(e));
     }
   };
 
-  const filteredEntries = entries.filter(e => 
-    !searchQuery || 
-    e.resource_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    e.workspace.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const patternCount = entries.filter((e) => e.match_type === "pattern").length;
+  const isPattern = draft.match_type === "pattern";
+
+  if (error && !entries.length) {
+    return <ErrorState message={error} onRetry={() => void load()} />;
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="space-y-5">
+      <header className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">Policy Allowlist</h1>
-          <p className="text-slate-400 mt-1 text-sm">Manage exceptions to governance policies across workspaces.</p>
+          <h1 className="text-lg font-semibold text-content">Exceptions</h1>
+          <p className="mt-1 text-xs text-content-muted">
+            Findings that have been agreed away. An exception suppresses a
+            finding; it does not change what the policy checks.
+          </p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="btn-primary"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Add Exception
-        </button>
-      </div>
+        <Button variant="primary" onClick={openForm}>
+          <Plus />
+          Add an exception
+        </Button>
+      </header>
 
-      <div className="bg-[#11151c] rounded-xl shadow-lg border border-slate-800 overflow-hidden">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 border-b border-slate-800">
-          <div className="relative w-full md:w-80">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
-              <input
-                type="text"
-                placeholder="Search resource or workspace..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex h-9 w-full rounded-[4px] border border-slate-700 bg-[#0b0f15] pl-9 pr-3 py-1 text-[13px] text-slate-200 placeholder-slate-500 shadow-sm focus:outline-none focus:ring-1 focus:ring-[#8acaff] focus:border-[#8acaff] transition-colors"
-              />
-          </div>
-          <button onClick={fetchEntries} className="p-2 text-slate-400 hover:text-slate-200 hover:bg-[#1b232d] rounded transition-colors" title="Refresh">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-[#161b22] text-slate-400 font-medium border-b border-slate-800">
-              <tr>
-                <th className="p-3 pl-5 font-medium">Resource</th>
-                <th className="p-3 font-medium">Workspace</th>
-                <th className="p-3 w-1/3 font-medium">Justification</th>
-                <th className="p-3 font-medium">Status</th>
-                <th className="p-3 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/50">
-              {loading && entries.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="p-8 text-center text-slate-500">
-                    <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-slate-400" />
-                    Loading exceptions...
-                  </td>
-                </tr>
-              ) : filteredEntries.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="p-8 text-center text-slate-500">
-                    No allowlist exceptions found.
-                  </td>
-                </tr>
-              ) : (
-                filteredEntries.map(entry => (
-                  <tr key={entry.id} className="hover:bg-[#1b232d] transition-colors">
-                    <td className="p-3 pl-5 font-mono text-xs text-slate-200 align-top">
-                      <div className="flex flex-col gap-1.5">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-sans bg-[#0b0f15] border border-slate-700 px-1.5 py-0.5 rounded w-max inline-block">
-                          {entry.resource_type}
-                        </span>
-                        <span className="break-all">{entry.resource_id}</span>
-                      </div>
-                    </td>
-                    <td className="p-3 align-top text-slate-300">
-                      {entry.workspace}
-                    </td>
-                    <td className="p-3 align-top text-slate-400 break-words">
-                      {entry.justification}
-                    </td>
-                    <td className="p-3 align-top">
-                      <span className={`px-2.5 py-1 rounded-full text-[10px] uppercase font-bold border ${
-                        entry.status === 'approved' ? 'bg-green-950/30 text-green-400 border-green-900/50' : 'bg-yellow-950/30 text-yellow-400 border-yellow-900/50'
-                      }`}>
-                        {entry.status}
-                      </span>
-                    </td>
-                    <td className="p-3 text-right align-top">
-                      <button 
-                        onClick={() => handleDelete(entry.id)}
-                        className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-950/50 rounded transition-colors"
-                        title="Delete Exception"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b0f15]/80 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="bg-[#11151c] border border-slate-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95">
-            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-[#161b22] shrink-0">
-                <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-                    <ShieldCheck className="w-5 h-5 text-blue-500" />
-                    Add Policy Exception
-                </h3>
-                <button onClick={() => setShowAddModal(false)} className="p-2 rounded-full hover:bg-slate-800 transition-colors">
-                    <X className="w-5 h-5 text-slate-400" />
-                </button>
-            </div>
-            <form onSubmit={handleAdd} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1.5">Resource ID</label>
-                <input
-                  required
-                  type="text"
-                  value={newEntry.resource_id}
-                  onChange={e => setNewEntry({...newEntry, resource_id: e.target.value})}
-                  className="w-full rounded-[4px] border border-slate-700 bg-[#0b0f15] text-slate-200 placeholder-slate-500 px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#8acaff] focus:border-[#8acaff] transition-colors"
-                  placeholder="e.g., cluster-12345 or /Shared/app"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Type</label>
-                  <select
-                    value={newEntry.resource_type}
-                    onChange={e => setNewEntry({...newEntry, resource_type: e.target.value})}
-                    className="w-full rounded-[4px] border border-slate-700 bg-[#0b0f15] text-slate-200 px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#8acaff] focus:border-[#8acaff] transition-colors"
-                  >
-                    <option value="app">App</option>
-                    <option value="cluster">Cluster</option>
-                    <option value="job">Job</option>
-                    <option value="sql_warehouse">SQL Warehouse</option>
-                    <option value="dashboard">Dashboard</option>
-                    <option value="genie_space">Genie Space</option>
-                    <option value="notebook">Notebook</option>
-                    <option value="table">Table</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Workspace</label>
-                  <input
-                    required
-                    type="text"
-                    value={newEntry.workspace}
-                    onChange={e => setNewEntry({...newEntry, workspace: e.target.value})}
-                    className="w-full rounded-[4px] border border-slate-700 bg-[#0b0f15] text-slate-200 px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#8acaff] focus:border-[#8acaff] transition-colors"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1.5">Justification</label>
-                <textarea
-                  required
-                  rows={3}
-                  value={newEntry.justification}
-                  onChange={e => setNewEntry({...newEntry, justification: e.target.value})}
-                  className="w-full rounded-[4px] border border-slate-700 bg-[#0b0f15] text-slate-200 placeholder-slate-500 px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#8acaff] focus:border-[#8acaff] transition-colors resize-none"
-                  placeholder="Explain why this resource is exempt from standard policies..."
-                />
-              </div>
-              
-              <div className="pt-4 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 bg-[#1b232d] border border-slate-700 text-slate-300 rounded hover:bg-[#252f3d] text-sm font-medium transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary"
-                >
-                  Save Exception
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {patternCount > 0 && (
+        <Alert tone="warning" title={`${patternCount} class-wide exception${patternCount === 1 ? "" : "s"} in force`}>
+          A pattern also covers resources created after it was written, so what
+          it hides grows on its own. The counts below are from the most recent
+          scan.
+        </Alert>
       )}
+
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-between gap-3 border-b border-border p-3">
+          <div className="relative w-full max-w-sm">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 text-content-subtle" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search resource, rule, workspace or reason"
+              className="pl-8"
+            />
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => void load()} title="Refresh">
+            <RefreshCw className={loading ? "animate-spin" : ""} />
+          </Button>
+        </div>
+
+        {loading && !entries.length ? (
+          <div className="flex items-center justify-center gap-2 p-10 text-xs text-content-muted">
+            <Spinner className="size-4" />
+            Loading exceptions
+          </div>
+        ) : !filtered.length ? (
+          <EmptyState
+            icon={<ShieldCheck className="size-8" />}
+            title={entries.length ? "Nothing matches that search" : "No exceptions"}
+            description={
+              entries.length
+                ? "Try a shorter search."
+                : "Every finding is currently being reported. Add an exception when a rule is knowingly not worth acting on."
+            }
+          />
+        ) : (
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>Scope</TableHeaderCell>
+                <TableHeaderCell>Workspace</TableHeaderCell>
+                <TableHeaderCell>Hiding</TableHeaderCell>
+                <TableHeaderCell>Expires</TableHeaderCell>
+                <TableHeaderCell>Reason</TableHeaderCell>
+                <TableHeaderCell className="text-right">Actions</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filtered.map((entry) => (
+                <ExceptionRow
+                  key={entry.id}
+                  entry={entry}
+                  impact={impact[entry.id]}
+                  onRemove={() => void remove(entry)}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Card>
+
+      <Dialog
+        open={adding}
+        onClose={() => setAdding(false)}
+        title="Add an exception"
+        description="An exception hides a finding. It does not change what the policy checks, and it does not change what a scan would do to anything else."
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setAdding(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              type="submit"
+              form="exception-form"
+              loading={saving}
+              disabled={saving}
+            >
+              Add exception
+            </Button>
+          </div>
+        }
+      >
+        <form id="exception-form" onSubmit={save} className="space-y-4">
+          {/* The fork, made explicit and made a decision rather than two
+              buttons that looked like unrelated features. Which scope you are
+              choosing is the most consequential thing on this form, so it is
+              the first thing on it and it says what each one costs. */}
+          <Field>
+            <Label>What should this cover?</Label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <ScopeChoice
+                selected={!isPattern}
+                onSelect={() => setScope("resource")}
+                title="One resource"
+                detail="Every rule that fails for one named resource is hidden. Nothing else is affected."
+              />
+              <ScopeChoice
+                selected={isPattern}
+                onSelect={() => setScope("pattern")}
+                title="One rule, for a class"
+                detail="One rule stops reporting for every resource of a type in one workspace, including ones created later. Must expire."
+                caution
+              />
+            </div>
+          </Field>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field>
+              <Label htmlFor="resource-type">Resource type</Label>
+              <Select
+                id="resource-type"
+                required
+                value={draft.resource_type}
+                onChange={(e) =>
+                  // Clearing the rule matters: the picker is filtered by type,
+                  // so keeping it would leave a rule selected that the new type
+                  // has no policies for, and the exception would match nothing.
+                  setDraft({ ...draft, resource_type: e.target.value, rule_id: "" })
+                }
+              >
+                {resourceTypes.map((type) => (
+                  <option key={type.value} value={type.value}>
+                    {type.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field>
+              <Label htmlFor="workspace">Workspace</Label>
+              <Input
+                id="workspace"
+                required
+                value={draft.workspace}
+                onChange={(e) => setDraft({ ...draft, workspace: e.target.value })}
+                placeholder="prod-analytics"
+              />
+            </Field>
+          </div>
+
+          {isPattern ? (
+            <Field>
+              <Label htmlFor="rule">Rule to waive</Label>
+              <Select
+                id="rule"
+                required
+                value={draft.rule_id}
+                onChange={(e) => setDraft({ ...draft, rule_id: e.target.value })}
+              >
+                <option value="">Choose a rule</option>
+                {rulesForType.map((rule) => (
+                  <option key={rule.id} value={rule.id}>
+                    {rule.label}
+                  </option>
+                ))}
+              </Select>
+              {!rulesForType.length && (
+                <p className="text-2xs text-warning">
+                  No policies cover {draft.resource_type || "this type"} yet, so
+                  there is nothing here to waive.
+                </p>
+              )}
+            </Field>
+          ) : (
+            <Field>
+              <Label htmlFor="resource-id">Resource ID</Label>
+              <Input
+                id="resource-id"
+                required
+                value={draft.resource_id}
+                onChange={(e) => setDraft({ ...draft, resource_id: e.target.value })}
+                placeholder="0123-456789-abcdef"
+                className="font-mono"
+              />
+            </Field>
+          )}
+
+          <Field>
+            <Label htmlFor="expires">
+              Expires {isPattern && <span className="text-danger">(required)</span>}
+            </Label>
+            <Input
+              id="expires"
+              type="date"
+              required={isPattern}
+              value={draft.expires_at}
+              onChange={(e) => setDraft({ ...draft, expires_at: e.target.value })}
+            />
+            <p className="text-2xs text-content-subtle">
+              {isPattern
+                ? "A class-wide waiver with no end date is a policy change that never went through review. If the rule is wrong, change the rule."
+                : "Leave this empty for an exception that never lapses."}
+            </p>
+          </Field>
+
+          <Field>
+            <Label htmlFor="justification">Why</Label>
+            <textarea
+              id="justification"
+              required
+              rows={3}
+              value={draft.justification}
+              onChange={(e) => setDraft({ ...draft, justification: e.target.value })}
+              placeholder="Who agreed this, and what makes it acceptable until it expires."
+              className="w-full resize-none rounded-md border border-border bg-surface px-3 py-2 text-xs text-content placeholder:text-content-subtle focus:border-brand focus:outline-none"
+            />
+          </Field>
+        </form>
+      </Dialog>
     </div>
+  );
+}
+
+function ScopeChoice({
+  selected,
+  onSelect,
+  title,
+  detail,
+  caution,
+}: {
+  selected: boolean;
+  onSelect: () => void;
+  title: string;
+  detail: string;
+  caution?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={cn(
+        "rounded-md border p-3 text-left transition-colors",
+        selected
+          ? caution
+            ? "border-warning bg-warning-subtle"
+            : "border-accent bg-accent-subtle"
+          : "border-border bg-surface hover:border-border-strong",
+      )}
+    >
+      <span className="flex items-center gap-1.5 text-xs font-medium text-content">
+        {caution && selected && (
+          <AlertTriangle className="size-3.5 text-warning" aria-hidden />
+        )}
+        {title}
+      </span>
+      <span className="mt-1 block text-2xs leading-relaxed text-content-muted">
+        {detail}
+      </span>
+    </button>
+  );
+}
+
+function ExceptionRow({
+  entry,
+  impact,
+  onRemove,
+}: {
+  entry: AllowlistEntry;
+  impact?: AllowlistImpact;
+  onRemove: () => void;
+}) {
+  const isPattern = entry.match_type === "pattern";
+  const expired = entry.expires_at ? new Date(entry.expires_at) < new Date() : false;
+
+  return (
+    <TableRow>
+      <TableCell className="align-top">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-1.5">
+            <Badge variant={isPattern ? "warning" : "outline"}>
+              {isPattern ? "class" : "resource"}
+            </Badge>
+            <Badge variant="outline" className="font-mono">
+              {entry.resource_type}
+            </Badge>
+          </div>
+          <span className="break-all font-mono text-2xs text-content">
+            {isPattern ? `every ${entry.resource_type}` : entry.resource_id}
+          </span>
+          {isPattern && (
+            <span className="font-mono text-2xs text-content-muted">
+              waives {entry.rule_id}
+            </span>
+          )}
+        </div>
+      </TableCell>
+
+      <TableCell className="align-top text-xs text-content-muted">
+        {entry.workspace}
+      </TableCell>
+
+      <TableCell className="align-top text-xs">
+        {impact === undefined ? (
+          <span className="text-content-subtle">—</span>
+        ) : impact.suppressed_findings === 0 ? (
+          <span className="text-content-subtle">nothing</span>
+        ) : (
+          <span className={isPattern ? "text-warning" : "text-content-muted"}>
+            {impact.suppressed_findings} finding
+            {impact.suppressed_findings === 1 ? "" : "s"}
+            {impact.suppressed_resources > 1 &&
+              ` across ${impact.suppressed_resources} resources`}
+          </span>
+        )}
+      </TableCell>
+
+      <TableCell className="align-top text-xs">
+        {!entry.expires_at ? (
+          <span className="text-content-subtle">never</span>
+        ) : expired ? (
+          <Badge variant="danger">lapsed</Badge>
+        ) : (
+          <span className="text-content-muted">
+            {new Date(entry.expires_at).toLocaleDateString()}
+          </span>
+        )}
+      </TableCell>
+
+      <TableCell className="align-top text-xs text-content-muted">
+        <span className="break-words">{entry.justification}</span>
+        {entry.created_by && (
+          <span className="mt-0.5 block text-2xs text-content-subtle">
+            {entry.created_by}
+          </span>
+        )}
+      </TableCell>
+
+      <TableCell className="text-right align-top">
+        <Button variant="ghost" size="sm" onClick={onRemove} title="Remove">
+          <Trash2 />
+        </Button>
+      </TableCell>
+    </TableRow>
   );
 }

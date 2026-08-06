@@ -4,15 +4,20 @@ Layer three of three. A curated subset of settings is backed by the
 ``app_settings`` table so a Platform Admin can change them in the UI without a
 code edit or redeploy.
 
-Two rules keep this honest:
+Three rules keep this honest:
 
-* **Only fields listed in :data:`EDITABLE_FIELDS` are editable.** Secrets,
-  connection strings, and anything that needs a restart to take effect are
-  deliberately absent — a settings page that appears to change something it
-  cannot is worse than not offering it.
+* **Only fields listed in :data:`EDITABLE_FIELDS` are editable.** Connection
+  strings and anything that needs a restart to take effect are deliberately
+  absent — a settings page that appears to change something it cannot is worse
+  than not offering it.
 * **Overrides are applied by mutating the live ``settings`` object**, so
   consumers that read ``settings.X`` at call time see the change immediately.
   This is why the golden rule about not caching settings at import exists.
+* **A ``secret`` field is write-only.** Its value goes in and is never read back
+  out: :func:`describe` reports whether one is configured and its last four
+  characters, and responses and logs are masked via :func:`public_value` and
+  :func:`mask_secret`. A credential that round-trips to the browser to populate
+  a field nobody needs to read is a credential in every admin's network log.
 """
 from __future__ import annotations
 
@@ -169,6 +174,53 @@ EDITABLE_FIELDS: List[Dict[str, Any]] = [
         "type": "bool",
         "help": "Walking the whole workspace tree is slow. Off by default.",
     },
+    # --- GitHub -------------------------------------------------------------
+    {
+        "group": "GitHub",
+        "key": "GITHUB_TOKEN",
+        "label": "Access token",
+        "type": "secret",
+        "help": (
+            "Needs read and write access to repository contents and pull requests. "
+            "If your organisation enforces SAML single sign-on, the token must also "
+            "be authorised for it. Stored server-side and never sent back to this page."
+        ),
+    },
+    {
+        "group": "GitHub",
+        "key": "GITHUB_REPO",
+        "label": "Repository",
+        "type": "string",
+        "placeholder": "owner/name",
+        # Dangerous because it decides which rules govern the estate. Pointed at
+        # another repository, the next sync replaces every policy with that
+        # repository's, and scans start enforcing rules nobody here reviewed.
+        "danger": True,
+        "help": (
+            "Where policies are read from and pull requests are opened, as owner/name. "
+            "Changing it replaces the working copy at the next sync."
+        ),
+    },
+    {
+        "group": "GitHub",
+        "key": "GITHUB_TARGET_BRANCH",
+        "label": "Target branch",
+        "type": "string",
+        "danger": True,
+        "help": (
+            "The branch policies are read from and pull requests are opened against. "
+            "Pointing this at an unprotected branch removes review from the path "
+            "between an edit and enforcement."
+        ),
+    },
+    {
+        "group": "GitHub",
+        "key": "GITHUB_POLICIES_DIR",
+        "label": "Policies directory",
+        "type": "string",
+        "danger": True,
+        "help": "Path within the repository holding the .rego files, e.g. backend/policies.",
+    },
     # --- Agent --------------------------------------------------------------
     {
         "group": "Agent",
@@ -299,6 +351,36 @@ def next_cron_runs(expression: str, count: int = 3) -> List[str]:
     return [cron.get_next(datetime).isoformat() for _ in range(count)]
 
 
+def validate_repo(value: str) -> Optional[str]:
+    """Why ``value`` is not a usable owner/name, or None when it is fine."""
+    text = value.strip()
+    if not text:
+        return None
+
+    parts = text.split("/")
+    if len(parts) != 2 or not all(p.strip() for p in parts):
+        return (
+            f"{text!r} is not an owner/name pair, e.g. "
+            "databricks-field-eng/policy-enforcement-sentinel."
+        )
+    if text.startswith("http") or "github.com" in text:
+        return "Use the owner/name pair on its own, not the repository's URL."
+    return None
+
+
+def mask_secret(value: Optional[str]) -> Optional[str]:
+    """Enough to recognise which credential is in place, and no more."""
+    if not value:
+        return None
+    tail = str(value)[-4:]
+    return f"\u2026{tail}"
+
+
+def public_value(field: Dict[str, Any], value: Any) -> Any:
+    """What may be shown for a field. Secrets never return their value."""
+    return None if field.get("type") == "secret" else value
+
+
 def _coerce(field: Dict[str, Any], raw: Optional[str]) -> Any:
     """Turn the stored string back into the type the setting expects."""
     if raw is None:
@@ -412,6 +494,11 @@ def set_override(db: Session, key: str, value: Any, updated_by: Optional[str] = 
         if problem is not None:
             raise ValueError(f"{serialized!r} is not a valid cron expression: {problem}")
 
+    if key == "GITHUB_REPO":
+        problem = validate_repo(serialized)
+        if problem is not None:
+            raise ValueError(problem)
+
     coerced = _coerce(field, serialized)
     if coerced is None and field.get("type") in ("int", "select", "cron"):
         raise ValueError(f"{value!r} is not a valid value for {key}")
@@ -426,11 +513,15 @@ def set_override(db: Session, key: str, value: Any, updated_by: Optional[str] = 
 
     _apply(key, coerced)
 
+    # The log is a place a secret would outlive the request, so it is masked
+    # here as well as in the response.
+    logged = mask_secret(coerced) if field.get("type") == "secret" else coerced
+
     if key in DANGER_KEYS:
         logger.warning(
             "SAFETY SETTING CHANGED: %s set to %r by %s",
             key,
-            coerced,
+            logged,
             updated_by or "unknown",
         )
     else:
@@ -454,16 +545,25 @@ def clear_override(db: Session, key: str) -> None:
 
 
 def describe(db: Session) -> List[Dict[str, Any]]:
-    """The schema plus current values, as rendered by the Settings page."""
+    """The schema plus current values, as rendered by the Settings page.
+
+    A secret's value is never included. Returning it would put the credential in
+    every admin's browser and network log to populate a field whose contents
+    nobody needs to read — ``configured`` and the last four characters are
+    enough to tell which token is in place.
+    """
     overrides = get_overrides(db)
     described = []
     for field in EDITABLE_FIELDS:
         key = field["key"]
-        described.append(
-            {
-                **field,
-                "value": getattr(settings, key, None),
-                "overridden": key in overrides,
-            }
-        )
+        raw = getattr(settings, key, None)
+        entry = {
+            **field,
+            "value": public_value(field, raw),
+            "overridden": key in overrides,
+        }
+        if field.get("type") == "secret":
+            entry["configured"] = bool(raw)
+            entry["hint"] = mask_secret(raw)
+        described.append(entry)
     return described

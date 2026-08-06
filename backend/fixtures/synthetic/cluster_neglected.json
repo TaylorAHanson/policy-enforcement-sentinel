@@ -1,0 +1,33 @@
+{
+  "description": "No compute policy, no tags, no autotermination. Three rules at once, which is what a genuinely abandoned cluster looks like in the data we actually have about it.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "0101-000000-aaaa",
+    "name": "analytics",
+    "type": "cluster",
+    "owner": "analytics@company.com",
+    "state": "RUNNING",
+    "cluster_type": "interactive",
+    "access_mode": "USER_ISOLATION",
+    "autotermination_minutes": null,
+    "policy_id": null,
+    "num_workers": 2,
+    "autoscale_max_workers": null,
+    "idle_days": 0,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CST-CLU-003",
+      "CST-CLU-004",
+      "CTL-CLU-002"
+    ],
+    "passes": [
+      "CST-CLU-005",
+      "SEC-CLU-001"
+    ]
+  }
+}

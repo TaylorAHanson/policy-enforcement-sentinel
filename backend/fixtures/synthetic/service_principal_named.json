@@ -1,0 +1,29 @@
+{
+  "description": "A service principal with a display name, which is what the owner field is derived from.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "sp-99",
+    "name": "svc-etl",
+    "type": "service_principal",
+    "owner": "svc-etl",
+    "active": true,
+    "application_id": "abc-123",
+    "entitlements": [
+      "allow-cluster-create"
+    ],
+    "roles": [],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [],
+    "passes": [
+      "CTL-SPN-003",
+      "SEC-SPN-001",
+      "SEC-SPN-002",
+      "SEC-SPN-004"
+    ]
+  }
+}

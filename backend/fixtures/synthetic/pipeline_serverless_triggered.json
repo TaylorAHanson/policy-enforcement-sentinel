@@ -1,0 +1,31 @@
+{
+  "description": "A well-configured production pipeline.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "pl-001",
+    "name": "bronze-to-silver",
+    "type": "pipeline",
+    "owner": "svc-etl@company.com",
+    "serverless": true,
+    "continuous": false,
+    "channel": "CURRENT",
+    "development": false,
+    "owner_type": "service_principal",
+    "target_catalog": "prod",
+    "metadata_complete": true,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [],
+    "passes": [
+      "CST-PIP-001",
+      "CST-PIP-005",
+      "CTL-PIP-002",
+      "CTL-PIP-003",
+      "SEC-PIP-004"
+    ]
+  }
+}

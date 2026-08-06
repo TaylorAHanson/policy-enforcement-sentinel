@@ -2,6 +2,7 @@ import os
 import glob
 import httpx
 import base64
+import re
 import time
 import logging
 from fastapi import APIRouter, HTTPException, Query
@@ -9,9 +10,17 @@ from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 from app.core.actions import describe_ladder
 from app.core.config import settings
+from app.providers.databricks.handlers import HANDLER_REGISTRY
 from app.providers.opa.client import OpaProvider
 from app.providers.opa.legacy_names import describe_migration
-from app.services import policy_history, policy_registry, policy_sync
+from app.services import (
+    policy_history,
+    policy_registry,
+    policy_rename,
+    policy_scaffold,
+    policy_sync,
+    resource_schema,
+)
 from app.services.github_errors import github_failure_detail
 
 logger = logging.getLogger(__name__)
@@ -33,6 +42,17 @@ class EvalRequest(BaseModel):
     content: str
     query: str
     input_data: Dict[str, Any]
+
+class PolicyRenamePayload(BaseModel):
+    new_name: str
+
+class PolicyScaffoldPayload(BaseModel):
+    name: str
+    resource_type: str
+    owner: str = ""
+    domain: str = ""
+    title: str = ""
+    description: str = ""
 
 def get_github_client():
     if not settings.GITHUB_TOKEN:
@@ -86,9 +106,60 @@ async def validate_policy(payload: PolicyValidatePayload):
     opa_provider = OpaProvider(settings.opa_provider_config())
     try:
         result = await opa_provider.check(payload.policy_name, payload.content)
-        return result
     except Exception as e:
         return {"valid": False, "errors": [str(e)]}
+
+    # Separate from `errors` on purpose. These do not stop the policy compiling
+    # — that is the whole problem with them. A rule reading a field nothing
+    # collects is valid Rego that can never fire, so it has to be reported as
+    # something other than a syntax error and it must not block a save.
+    try:
+        result["warnings"] = resource_schema.check_fields(
+            payload.content, _resource_type_of(payload.policy_name, payload.content)
+        )
+    except Exception as e:
+        logger.debug("Field check failed for %s: %s", payload.policy_name, e)
+        result["warnings"] = []
+
+    return result
+
+
+def _resource_type_of(policy_name: str, content: str) -> Optional[str]:
+    """The resource type a policy governs.
+
+    From the registry when the policy is committed; from the draft's own
+    metadata annotation when it is not, since a new policy has no registry entry
+    yet and that is exactly when the field check is most useful.
+    """
+    descriptor = policy_registry.get_policy(policy_name)
+    if descriptor and descriptor.resource_type:
+        return descriptor.resource_type
+
+    match = re.search(r"resource_type:\s*([a-zA-Z_][a-zA-Z0-9_]*)", content)
+    return match.group(1) if match else None
+
+
+@router.get("/schema")
+def resource_field_catalog(resource_type: Optional[str] = None):
+    """Every field a policy can read, per resource type.
+
+    Published because a policy cannot test what discovery never collected, and
+    Rego gives no indication when it tries — the rule just never fires.
+    """
+    if resource_type:
+        fields = resource_schema.resource_fields(resource_type)
+        if resource_type not in HANDLER_REGISTRY:
+            raise HTTPException(
+                status_code=404, detail=f"No handler collects {resource_type!r}."
+            )
+        return {
+            "resource_type": resource_type,
+            "fields": [
+                {"name": name, "description": description}
+                for name, description in sorted(fields.items())
+            ],
+        }
+    return resource_schema.catalog()
 
 @router.post("/evaluate")
 async def evaluate_policy(payload: EvalRequest):
@@ -134,6 +205,105 @@ async def list_policy_metadata():
         "renamed_policies": describe_migration(),
         "history_available": policy_history.is_available(settings.get_policies_dir),
     }
+
+
+@router.get("/dashboard")
+async def policy_dashboard():
+    """Everything the policy list needs, in one request.
+
+    The dashboard shows, per policy, its rules, when it was last edited, and how
+    many findings it produced in the most recent scan. Assembled here rather
+    than in the browser because the alternative is a metadata call, a history
+    call per policy, and a facets call — fourteen policies would mean sixteen
+    round trips before the first row appears.
+
+    Every part except the policy list itself is optional. A deployment with no
+    git checkout has no edit history, and an estate that has never been scanned
+    has no findings; both render a dashboard with a column missing rather than
+    an error.
+    """
+    try:
+        policies = policy_registry.load_policies()
+    except policy_registry.PolicyRegistryError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    policies_dir = settings.get_policies_dir
+    edits = policy_history.last_edits(policies_dir, [p.name for p in policies])
+
+    rows = []
+    for policy in policies:
+        payload = policy.to_dict()
+        payload["last_edit"] = edits.get(policy.name)
+        payload["uncommitted_changes"] = policy_history.uncommitted_changes(
+            policies_dir, policy.name
+        )
+        rows.append(payload)
+
+    findings, run = _latest_findings_by_policy()
+
+    return {
+        "policies": rows,
+        "summary": policy_registry.registry_summary(),
+        "findings_by_policy": findings,
+        "latest_run": run,
+        "history_available": policy_history.is_available(policies_dir),
+        "github_enabled": bool(settings.GITHUB_TOKEN and settings.GITHUB_REPO),
+        # So the list can say which policies govern a resource type nothing
+        # discovers. Those show zero findings forever, which is indistinguishable
+        # from a clean estate unless the difference is stated.
+        "discovered_resource_types": sorted(HANDLER_REGISTRY),
+    }
+
+
+def _latest_findings_by_policy() -> tuple:
+    """Violation counts per policy from the most recent completed scan.
+
+    Returns ``({}, None)`` when nothing has been scanned yet, which is the
+    normal state of a fresh install rather than a failure.
+    """
+    from sqlalchemy import func
+
+    from app.db.session import get_session_local
+    from app.db.sentinel_finding import SentinelFindingModel
+    from app.db.sentinel_run import SentinelRunModel
+
+    try:
+        with get_session_local()() as session:
+            latest = (
+                session.query(SentinelRunModel)
+                .order_by(SentinelRunModel.started_at.desc())
+                .first()
+            )
+            if latest is None:
+                return {}, None
+
+            counts = (
+                session.query(
+                    SentinelFindingModel.policy,
+                    func.count(SentinelFindingModel.id),
+                )
+                .filter(
+                    SentinelFindingModel.run_id == latest.id,
+                    SentinelFindingModel.kind == "violation",
+                )
+                .group_by(SentinelFindingModel.policy)
+                .all()
+            )
+
+            return (
+                {policy: count for policy, count in counts if policy},
+                {
+                    "run_id": latest.id,
+                    "started_at": (
+                        latest.started_at.isoformat() if latest.started_at else None
+                    ),
+                    "status": latest.status,
+                },
+            )
+    except Exception as e:
+        # A dashboard is not worth a 500. The column simply does not render.
+        logger.warning("Could not read findings for the policy dashboard: %s", e)
+        return {}, None
 
 
 @router.get("/metadata/summary")
@@ -515,6 +685,187 @@ async def create_policy_pr(policy_name: str, payload: PolicyContent):
         "branch": branch,
         "escalations": escalations,
         "explanation_committed": explanation_committed,
+    }
+
+
+@router.post("/{policy_name}/rename")
+async def rename_policy(policy_name: str, payload: PolicyRenamePayload):
+    """Propose renaming a policy as a pull request.
+
+    A rename is not a file move. Allowlist exceptions, saved filters and stored
+    findings all reference a policy by name, and a bare move would leave them
+    pointing at nothing — silently, because an exception that matches nothing
+    just stops suppressing, which reads as the rule getting stricter rather than
+    as a broken reference.
+
+    So the single pull request does three things: writes the file under its new
+    name, rewrites the ``package`` declaration to match, and records the old
+    name in ``custom.replaces`` so everything that still names it keeps
+    resolving. See ``services/policy_rename.py``.
+    """
+    _require_github()
+
+    if not policy_name.endswith(".rego"):
+        policy_name += ".rego"
+
+    try:
+        new_stem = policy_rename.validate_name(payload.new_name)
+    except policy_rename.RenameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    existing = {
+        policy_rename.normalise(p.name) for p in policy_registry.load_policies()
+    }
+    if new_stem in existing:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"There is already a policy called {new_stem}. Two policies "
+                "cannot share a package name — OPA would merge their rules."
+            ),
+        )
+
+    async with get_github_client() as client:
+        current = await _fetch_committed(client, policy_name)
+        if not current:
+            raise HTTPException(
+                status_code=404,
+                detail=f"{policy_name} is not on {settings.GITHUB_TARGET_BRANCH}.",
+            )
+
+        try:
+            result = policy_rename.rename(current, policy_name, new_stem)
+        except policy_rename.RenameError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        branch = await _branch_from_target(
+            client, f"rename-policy-{policy_rename.normalise(policy_name)}"
+        )
+        message = f"Rename policy {result.old_name} to {result.new_name}"
+
+        await _commit_file(
+            client,
+            path=_repo_path(result.new_name),
+            content=result.content,
+            branch=branch,
+            message=message,
+        )
+        await _delete_file(
+            client, path=_repo_path(result.old_name), branch=branch, message=message
+        )
+
+        # The explanation is named after the policy, so it moves too. Best
+        # effort: a missing explanation is not a reason to fail a rename.
+        old_explanation = _explanation_repo_path(result.old_name)
+        new_explanation = _explanation_repo_path(result.new_name)
+        try:
+            resp = await client.get(
+                f"/repos/{settings.GITHUB_REPO}/contents/{old_explanation}"
+                f"?ref={settings.GITHUB_TARGET_BRANCH}"
+            )
+            if resp.status_code == 200:
+                text = base64.b64decode(resp.json()["content"]).decode("utf-8")
+                await _commit_file(
+                    client,
+                    path=new_explanation,
+                    content=text,
+                    branch=branch,
+                    message=message,
+                )
+                await _delete_file(
+                    client, path=old_explanation, branch=branch, message=message
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning("Could not move the explanation for %s: %s", policy_name, e)
+
+        body = (
+            f"Renames `{result.old_name}` to `{result.new_name}`.\n\n"
+            f"The Rego package changes from `{result.old_package}` to "
+            f"`{result.new_package}`, and `{policy_rename.normalise(policy_name)}` "
+            "is recorded in `custom.replaces` so allowlist exceptions, saved "
+            "filters and stored findings that name the old spelling keep "
+            "resolving to this policy.\n\n"
+            "Rule IDs are unchanged, so nothing that references a rule directly "
+            "is affected.\n"
+        )
+        pr_url = await _open_pr(
+            client,
+            title=f"Rename governance policy: {result.old_name} → {result.new_name}",
+            body=body,
+            branch=branch,
+        )
+
+    return {
+        "message": "Pull request created successfully",
+        "pr_url": pr_url,
+        "branch": branch,
+        "old_name": result.old_name,
+        "new_name": result.new_name,
+        "new_package": result.new_package,
+    }
+
+
+@router.post("/scaffold")
+async def scaffold_policy(payload: PolicyScaffoldPayload):
+    """Starting text for a new policy. Writes nothing.
+
+    Returned to the editor as an unsaved draft so the usual validate-then-PR
+    path applies — a new policy is created by the same reviewed route as a
+    change to an existing one, not by a second mechanism that bypasses it.
+    """
+    try:
+        name = policy_rename.validate_name(payload.name)
+    except policy_rename.RenameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    existing = {
+        policy_rename.normalise(p.name) for p in policy_registry.load_policies()
+    }
+    if name in existing:
+        raise HTTPException(
+            status_code=409, detail=f"There is already a policy called {name}."
+        )
+
+    try:
+        content = policy_scaffold.starter_policy(
+            name,
+            resource_type=payload.resource_type,
+            owner=payload.owner,
+            domain=payload.domain,
+            title=payload.title,
+            description=payload.description,
+        )
+    except policy_rename.RenameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"name": f"{name}.rego", "content": content}
+
+
+@router.get("/scaffold/defaults")
+async def scaffold_defaults():
+    """Resource types a policy can govern, and unused names for them."""
+    try:
+        taken = [p.name for p in policy_registry.load_policies()]
+    except policy_registry.PolicyRegistryError:
+        taken = []
+
+    governed = {
+        p.resource_type for p in policy_registry.load_policies() if p.resource_type
+    } if taken else set()
+
+    return {
+        "resource_types": [
+            {
+                "resource_type": resource_type,
+                "suggested_name": policy_scaffold.suggest_name(resource_type, taken),
+                # A type already covered is not an error — a second policy for
+                # one resource type is legitimate — but it is worth showing.
+                "already_governed": resource_type in governed,
+            }
+            for resource_type in sorted(HANDLER_REGISTRY)
+        ],
     }
 
 

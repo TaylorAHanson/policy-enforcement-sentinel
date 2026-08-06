@@ -1,0 +1,28 @@
+{
+  "description": "Production logic scheduled out of somebody's home directory. Both rules fire: it is invisible to review, and it disappears with the account. `is_scheduled` is true because a job task points at this exact path.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "/Users/someone@company.com/prod-load",
+    "name": "prod-load",
+    "type": "notebook",
+    "owner": "someone@company.com",
+    "path": "/Users/someone@company.com/prod-load",
+    "language": "PYTHON",
+    "in_shared": false,
+    "in_git_folder": false,
+    "is_scheduled": true,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CTL-NBK-002",
+      "CTL-NBK-003"
+    ],
+    "passes": [
+      "SEC-NBK-001"
+    ]
+  }
+}

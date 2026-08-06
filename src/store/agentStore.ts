@@ -2,12 +2,11 @@ import { create } from "zustand";
 
 import {
   api,
-  ApiError,
-  type AgentAnswer,
   type AgentStatus,
   type AgentToolCall,
   type AuthoredPolicy,
   type ChatTurn,
+  type FieldWarning,
   type GuardrailViolation,
 } from "../services/api";
 import { toast } from "./toastStore";
@@ -18,6 +17,25 @@ export interface ChatMessage extends ChatTurn {
   toolCalls?: AgentToolCall[];
   truncated?: boolean;
   failed?: boolean;
+  /**
+   * A policy file the assistant proposed in this turn, rendered as a diff.
+   * Attached to the message rather than held once for the panel so that
+   * scrolling back shows what was proposed at the time, and so a later turn
+   * cannot silently replace a diff the user is still reading.
+   */
+  proposal?: AuthoredPolicy;
+  /** Set when the tier ceiling withdrew a proposal from this turn. */
+  refusal?: GuardrailViolation;
+  /**
+   * Fields the proposal reads that discovery never collects.
+   *
+   * Kept next to the diff rather than shown as a toast, because it is the one
+   * thing about a proposal that will not announce itself later: the policy
+   * compiles, saves, merges, and then never fires.
+   */
+  fieldWarnings?: FieldWarning[];
+  /** True once the user has taken or dismissed the proposal. */
+  resolved?: boolean;
 }
 
 interface AgentState {
@@ -27,38 +45,30 @@ interface AgentState {
   messages: ChatMessage[];
   asking: boolean;
 
-  authoring: boolean;
-  proposal: AuthoredPolicy | null;
-  /** A 422 from the tier guardrail, kept separate from a transport failure. */
-  guardrailViolations: string[];
-  guardrailRemedy: string;
+  /**
+   * What is typed but not yet sent.
+   *
+   * Lives here rather than in the composer so other parts of the editor can put
+   * words in it — "Add rule" hands over a half-written request instead of
+   * dropping you at an empty box — and so switching tabs mid-sentence does not
+   * discard it.
+   */
+  composerDraft: string;
+  setComposerDraft: (value: string) => void;
 
   loadStatus: () => Promise<void>;
-  ask: (question: string) => Promise<void>;
+  send: (
+    message: string,
+    context?: { targetPolicy?: string; openContent?: string },
+  ) => Promise<void>;
+  resolveProposal: (messageId: number) => void;
   clearChat: () => void;
-  author: (
-    instruction: string,
-    context?: { targetPolicy?: string; existingContent?: string },
-  ) => Promise<AuthoredPolicy | null>;
-  dismissProposal: () => void;
 }
 
 let nextId = 1;
 
 /** How many prior turns to send back. The server caps this too. */
 const HISTORY_LIMIT = 8;
-
-/** The tier guardrail refusing, as opposed to the request failing. */
-function guardrailDetail(error: unknown): GuardrailViolation | null {
-  if (!(error instanceof ApiError) || error.status !== 422) return null;
-  const detail = error.detail as Partial<GuardrailViolation> | undefined;
-  if (detail?.error !== "guardrail_violation") return null;
-  return {
-    error: "guardrail_violation",
-    violations: detail.violations ?? [],
-    remedy: detail.remedy ?? "",
-  };
-}
 
 export const useAgentStore = create<AgentState>((set, get) => ({
   status: null,
@@ -67,10 +77,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   messages: [],
   asking: false,
 
-  authoring: false,
-  proposal: null,
-  guardrailViolations: [],
-  guardrailRemedy: "",
+  composerDraft: "",
+  setComposerDraft: (composerDraft) => set({ composerDraft }),
 
   loadStatus: async () => {
     try {
@@ -83,48 +91,74 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  ask: async (question) => {
-    const trimmed = question.trim();
+  send: async (message, context) => {
+    const trimmed = message.trim();
     if (!trimmed || get().asking) return;
 
-    const userMessage: ChatMessage = {
-      id: nextId++,
-      role: "user",
-      content: trimmed,
-    };
-
-    // The history sent is the transcript before this question, so the server
-    // does not receive the question twice.
+    // The history sent is the transcript before this message, so the server
+    // does not receive it twice.
     const history: ChatTurn[] = get()
       .messages.slice(-HISTORY_LIMIT)
       .map(({ role, content }) => ({ role, content }));
 
-    set((state) => ({ messages: [...state.messages, userMessage], asking: true }));
+    set((state) => ({
+      messages: [...state.messages, { id: nextId++, role: "user", content: trimmed }],
+      asking: true,
+    }));
 
     try {
-      const answer: AgentAnswer = await api.agent.ask({ question: trimmed, history });
+      const reply = await api.agent.chat({
+        message: trimmed,
+        history,
+        target_policy: context?.targetPolicy,
+        open_content: context?.openContent,
+      });
+
       set((state) => ({
         messages: [
           ...state.messages,
           {
             id: nextId++,
             role: "assistant",
-            content: answer.answer,
-            toolCalls: answer.tool_calls,
-            truncated: answer.truncated,
+            // A reply that is only a policy file would otherwise leave an empty
+            // bubble above the diff, which reads as a failure.
+            content: reply.answer || "Here is the change.",
+            toolCalls: reply.tool_calls,
+            truncated: reply.truncated,
+            proposal: reply.proposal ?? undefined,
+            refusal: reply.refusal ?? undefined,
+            fieldWarnings: reply.field_warnings?.length
+              ? reply.field_warnings
+              : undefined,
           },
         ],
         asking: false,
       }));
+
+      if (reply.refusal) {
+        toast.error(
+          "The assistant withdrew its change",
+          "It asked for an action above the Tier 2 ceiling.",
+        );
+      } else if (reply.proposal && !reply.proposal.valid) {
+        toast.warning(
+          "The proposed policy did not compile",
+          "Review the validation errors before taking it.",
+        );
+      } else if (reply.field_warnings?.length) {
+        toast.warning(
+          "This change would never fire",
+          `It reads ${reply.field_warnings[0].field}, which the scanner does not collect.`,
+        );
+      }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       set((state) => ({
         messages: [
           ...state.messages,
           {
             id: nextId++,
             role: "assistant",
-            content: message,
+            content: error instanceof Error ? error.message : String(error),
             failed: true,
           },
         ],
@@ -133,49 +167,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
+  resolveProposal: (messageId) =>
+    set((state) => ({
+      messages: state.messages.map((message) =>
+        message.id === messageId ? { ...message, resolved: true } : message,
+      ),
+    })),
+
   clearChat: () => set({ messages: [] }),
-
-  author: async (instruction, context) => {
-    set({ authoring: true, guardrailViolations: [], guardrailRemedy: "" });
-    try {
-      const proposal = await api.agent.author({
-        instruction,
-        target_policy: context?.targetPolicy,
-        existing_content: context?.existingContent,
-      });
-      set({ proposal, authoring: false });
-
-      if (!proposal.valid) {
-        toast.warning(
-          "The draft did not compile",
-          "Review the validation errors before saving.",
-        );
-      }
-      return proposal;
-    } catch (error) {
-      const guardrail = guardrailDetail(error);
-      if (guardrail) {
-        set({
-          authoring: false,
-          guardrailViolations: guardrail.violations,
-          guardrailRemedy: guardrail.remedy,
-        });
-        toast.error(
-          "The assistant refused this policy",
-          "It asked for an action above the Tier 2 ceiling.",
-        );
-        return null;
-      }
-
-      set({ authoring: false });
-      toast.error(
-        "Could not draft the policy",
-        error instanceof Error ? error.message : String(error),
-      );
-      return null;
-    }
-  },
-
-  dismissProposal: () =>
-    set({ proposal: null, guardrailViolations: [], guardrailRemedy: "" }),
 }));

@@ -1,0 +1,46 @@
+{
+  "description": "The shape absence actually takes in production. The handlers write the literal \"unknown\" when the API named nobody, so a rule that only checked for a missing key saw a perfectly good owner on every unowned table in the estate. This is the fixture that matters most of the five.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "prod.sales.orders",
+    "name": "orders",
+    "type": "dataset",
+    "owner": "unknown",
+    "catalog": "prod",
+    "schema": "sales",
+    "table_type": "MANAGED",
+    "has_description": true,
+    "certified": false,
+    "quarantined": false,
+    "last_altered": "2026-07-01T00:00:00Z",
+    "idle_days": 5,
+    "all_columns_have_descriptions": true,
+    "tags": {
+      "owner_group": "data-platform",
+      "approver_group": "governance",
+      "domain": "sales",
+      "slo_sla": "99.9",
+      "data_classification": "internal",
+      "reliability_window": "7d"
+    }
+  },
+  "expect": {
+    "fires": [
+      "CTL-DST-001",
+      "CTL-DST-007"
+    ],
+    "passes": [
+      "CTL-DST-002",
+      "CTL-DST-003",
+      "CTL-DST-008",
+      "CTL-DST-009",
+      "CTL-DST-010",
+      "SEC-DST-004",
+      "SEC-DST-005",
+      "SEC-DST-006"
+    ]
+  }
+}

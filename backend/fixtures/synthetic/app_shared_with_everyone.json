@@ -1,0 +1,29 @@
+{
+  "description": "An app shared with the whole workspace. Everyone who can open it inherits the effective permissions of its service principal, which is what makes SEC-APP-002 a security rule rather than a tidiness one.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "sales-forecast",
+    "name": "sales-forecast",
+    "type": "app",
+    "owner": "analytics@company.com",
+    "state": "RUNNING",
+    "url": "https://example.databricksapps.com",
+    "shared_with": [
+      "ALL_USERS"
+    ],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CST-APP-004",
+      "SEC-APP-001",
+      "SEC-APP-002"
+    ],
+    "passes": [
+      "CST-APP-003"
+    ]
+  }
+}

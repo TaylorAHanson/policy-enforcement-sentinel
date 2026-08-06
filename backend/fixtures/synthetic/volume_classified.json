@@ -1,0 +1,28 @@
+{
+  "description": "A managed volume carrying a data classification.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "prod.raw.landing",
+    "name": "landing",
+    "type": "storage",
+    "owner": "data-platform@company.com",
+    "storage_type": "MANAGED",
+    "catalog": "prod",
+    "schema": "raw",
+    "tags": {
+      "data_classification": "internal"
+    }
+  },
+  "expect": {
+    "fires": [],
+    "passes": [
+      "CTL-VOL-003",
+      "CTL-VOL-004",
+      "SEC-VOL-001",
+      "SEC-VOL-002"
+    ]
+  }
+}

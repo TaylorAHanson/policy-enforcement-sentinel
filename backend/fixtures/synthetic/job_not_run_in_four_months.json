@@ -1,0 +1,33 @@
+{
+  "description": "A scheduled job that has not run in 120 days -- paused, or scheduled for a date that never comes round. Absent from this: a job that has never run at all, which reports no `idle_days` rather than its age.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "884422",
+    "name": "nightly-load",
+    "type": "job",
+    "owner": "svc-etl@company.com",
+    "schedule": "0 0 2 * * ?",
+    "paused": false,
+    "max_concurrent_runs": 1,
+    "owner_type": "service_principal",
+    "idle_days": 120,
+    "tags": {
+      "cost-center": "CC-4100",
+      "owner": "data-platform@company.com"
+    }
+  },
+  "expect": {
+    "fires": [
+      "CST-JOB-003",
+      "CTL-JOB-005"
+    ],
+    "passes": [
+      "CST-JOB-004",
+      "CTL-JOB-002",
+      "SEC-JOB-001"
+    ]
+  }
+}

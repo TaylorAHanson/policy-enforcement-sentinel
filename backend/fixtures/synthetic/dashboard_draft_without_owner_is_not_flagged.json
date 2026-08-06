@@ -1,0 +1,27 @@
+{
+  "description": "The same unowned dashboard, never published. CTL-DSH-002 is about things people are looking at, not about drafts, and this is the pair that keeps the `is_published` half of it load-bearing.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "dsh-001",
+    "name": "Revenue overview",
+    "type": "dashboard",
+    "owner": "",
+    "uses_embedded_credentials": false,
+    "is_published": false,
+    "shared_with": [
+      "data-analysts"
+    ],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [],
+    "passes": [
+      "CTL-DSH-002",
+      "CTL-DSH-003",
+      "SEC-DSH-001"
+    ]
+  }
+}

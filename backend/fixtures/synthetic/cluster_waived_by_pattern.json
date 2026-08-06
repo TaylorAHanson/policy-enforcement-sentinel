@@ -1,0 +1,44 @@
+{
+  "description": "A cluster with no compute policy in a workspace where CTL-CLU-002 has been waived for the whole class. The rule still evaluates and still fails; the exception is what turns the action into SKIPPED_ALLOWLIST, and the other rules are untouched.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "0101-000000-aaaa",
+    "name": "analytics",
+    "type": "cluster",
+    "owner": "analytics@company.com",
+    "state": "RUNNING",
+    "cluster_type": "interactive",
+    "access_mode": "USER_ISOLATION",
+    "autotermination_minutes": 30,
+    "policy_id": null,
+    "num_workers": 2,
+    "autoscale_max_workers": null,
+    "idle_days": 0,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CST-CLU-003",
+      "CTL-CLU-002"
+    ],
+    "passes": [
+      "CST-CLU-004",
+      "CST-CLU-005",
+      "SEC-CLU-001"
+    ]
+  },
+  "allowlist_records": [
+    {
+      "id": "synthetic-pattern-1",
+      "match_type": "pattern",
+      "resource_type": "cluster",
+      "rule_id": "CTL-CLU-002",
+      "status": "approved",
+      "justification": "Migration in progress, agreed with the platform team.",
+      "expires_at": null
+    }
+  ]
+}

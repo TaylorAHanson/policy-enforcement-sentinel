@@ -1,0 +1,33 @@
+{
+  "description": "Exactly ten clusters. CST-WHS-003 fires above ten, not at it, and an off-by-one here would flag every large warehouse on its tenth cluster.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "wh-01",
+    "name": "analytics-wh",
+    "type": "sql_warehouse",
+    "owner": "data-platform@company.com",
+    "state": "RUNNING",
+    "auto_stop_mins": 20,
+    "max_num_clusters": 10,
+    "warehouse_type": "PRO",
+    "serverless": true,
+    "tags": {
+      "cost-center": "CC-4100",
+      "owner": "data-platform@company.com"
+    }
+  },
+  "expect": {
+    "fires": [
+      "CTL-WHS-001"
+    ],
+    "passes": [
+      "CST-WHS-002",
+      "CST-WHS-003",
+      "CST-WHS-004",
+      "CST-WHS-005"
+    ]
+  }
+}

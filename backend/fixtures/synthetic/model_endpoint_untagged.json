@@ -1,0 +1,31 @@
+{
+  "description": "The same endpoint with no cost_center tag, which is what CST-MSE-001 was always meant to catch and never could.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "fraud-scorer",
+    "name": "fraud-scorer",
+    "type": "model_serving_endpoint",
+    "owner": "ml@company.com",
+    "endpoint_type": "EXTERNAL_MODEL",
+    "ready": "READY",
+    "scale_to_zero": true,
+    "inference_logging": true,
+    "shared_with": [
+      "ml-consumers"
+    ],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CST-MSE-001"
+    ],
+    "passes": [
+      "CST-MSE-002",
+      "CTL-MSE-004",
+      "SEC-MSE-003"
+    ]
+  }
+}

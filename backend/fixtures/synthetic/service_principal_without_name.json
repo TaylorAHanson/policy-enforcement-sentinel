@@ -1,0 +1,30 @@
+{
+  "description": "SCIM can return a principal with no display name, leaving nobody to ask about it. The handler derives `owner` from that same name, so an unnamed principal is also an unowned one.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "sp-99",
+    "name": "",
+    "type": "service_principal",
+    "owner": "",
+    "active": true,
+    "application_id": "abc-123",
+    "entitlements": [
+      "allow-cluster-create"
+    ],
+    "roles": [],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CTL-SPN-003"
+    ],
+    "passes": [
+      "SEC-SPN-001",
+      "SEC-SPN-002",
+      "SEC-SPN-004"
+    ]
+  }
+}

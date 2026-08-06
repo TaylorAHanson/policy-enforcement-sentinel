@@ -1,0 +1,29 @@
+{
+  "description": "The same app outside production. SEC-APP-001 is scoped to enterprise prod, so this is the pair proving that condition is real rather than decorative.",
+  "workspace": "synthetic-dev",
+  "workspace_type": "enterprise",
+  "environment": "dev",
+  "source": "authored",
+  "resource": {
+    "id": "sales-forecast",
+    "name": "sales-forecast",
+    "type": "app",
+    "owner": "analytics@company.com",
+    "state": "RUNNING",
+    "url": "https://example.databricksapps.com",
+    "shared_with": [
+      "analytics-team"
+    ],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CST-APP-004"
+    ],
+    "passes": [
+      "CST-APP-003",
+      "SEC-APP-001",
+      "SEC-APP-002"
+    ]
+  }
+}

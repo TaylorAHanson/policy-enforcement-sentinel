@@ -14,6 +14,7 @@ the target branch.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from typing import Optional
@@ -22,6 +23,15 @@ from app.agents import prompts
 from app.services.agent_llm import AgentLLMClient
 
 logger = logging.getLogger(__name__)
+
+
+def content_sha(content: str) -> str:
+    """The cache key: what was explained, not which file it lives in.
+
+    Normalised on trailing whitespace so that a stray newline, which changes
+    nothing about what the policy does, does not cost a regeneration.
+    """
+    return hashlib.sha256(content.strip().encode("utf-8")).hexdigest()
 
 
 def explanation_path(policies_dir: str, policy_name: str) -> str:

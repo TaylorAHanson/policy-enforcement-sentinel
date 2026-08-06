@@ -1,0 +1,32 @@
+{
+  "description": "A well-configured customer endpoint. Every one of these four rules used to be unanswerable: three read an `attributes` object no handler ever built, and the chargeback rule read `attributes.custom_tags.cost_center` -- which, being a path through a missing object, made `not` true and fired on every endpoint in the estate regardless of its tags.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "fraud-scorer",
+    "name": "fraud-scorer",
+    "type": "model_serving_endpoint",
+    "owner": "ml@company.com",
+    "endpoint_type": "EXTERNAL_MODEL",
+    "ready": "READY",
+    "scale_to_zero": true,
+    "inference_logging": true,
+    "shared_with": [
+      "ml-consumers"
+    ],
+    "tags": {
+      "cost_center": "CC-4100"
+    }
+  },
+  "expect": {
+    "fires": [],
+    "passes": [
+      "CST-MSE-001",
+      "CST-MSE-002",
+      "CTL-MSE-004",
+      "SEC-MSE-003"
+    ]
+  }
+}

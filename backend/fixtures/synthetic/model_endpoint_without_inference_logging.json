@@ -1,0 +1,33 @@
+{
+  "description": "A production endpoint not capturing inference to Unity Catalog, so there is no record of what it was asked or what it answered.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "fraud-scorer",
+    "name": "fraud-scorer",
+    "type": "model_serving_endpoint",
+    "owner": "ml@company.com",
+    "endpoint_type": "EXTERNAL_MODEL",
+    "ready": "READY",
+    "scale_to_zero": true,
+    "inference_logging": false,
+    "shared_with": [
+      "ml-consumers"
+    ],
+    "tags": {
+      "cost_center": "CC-4100"
+    }
+  },
+  "expect": {
+    "fires": [
+      "CTL-MSE-004"
+    ],
+    "passes": [
+      "CST-MSE-001",
+      "CST-MSE-002",
+      "SEC-MSE-003"
+    ]
+  }
+}

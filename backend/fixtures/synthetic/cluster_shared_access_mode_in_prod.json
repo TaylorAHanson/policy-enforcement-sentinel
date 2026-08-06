@@ -1,0 +1,36 @@
+{
+  "description": "A production cluster in a mode with no separation between its users. The rule used to test `access_mode == \"shared\"`, a literal the SDK has never emitted for any cluster, so it had never once fired.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "0101-000000-aaaa",
+    "name": "analytics",
+    "type": "cluster",
+    "owner": "analytics@company.com",
+    "state": "RUNNING",
+    "cluster_type": "interactive",
+    "access_mode": "LEGACY_SINGLE_USER_STANDARD",
+    "autotermination_minutes": 30,
+    "policy_id": "E0123456789",
+    "num_workers": 2,
+    "autoscale_max_workers": null,
+    "idle_days": 0,
+    "tags": {
+      "cost-center": "CC-4100",
+      "owner": "data-platform@company.com"
+    }
+  },
+  "expect": {
+    "fires": [
+      "SEC-CLU-001"
+    ],
+    "passes": [
+      "CST-CLU-003",
+      "CST-CLU-004",
+      "CST-CLU-005",
+      "CTL-CLU-002"
+    ]
+  }
+}

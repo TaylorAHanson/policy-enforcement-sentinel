@@ -1,0 +1,33 @@
+{
+  "description": "A production job that runs as its author. `owner_type` comes from the job's run-as setting rather than its creator, which matters -- a job somebody built and correctly pointed at a service principal is fine, and this rule must not flag it.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "884422",
+    "name": "nightly-load",
+    "type": "job",
+    "owner": "someone@company.com",
+    "schedule": "0 0 2 * * ?",
+    "paused": false,
+    "max_concurrent_runs": 1,
+    "owner_type": "user",
+    "idle_days": 1,
+    "tags": {
+      "cost-center": "CC-4100",
+      "owner": "data-platform@company.com"
+    }
+  },
+  "expect": {
+    "fires": [
+      "CTL-JOB-005",
+      "SEC-JOB-001"
+    ],
+    "passes": [
+      "CST-JOB-003",
+      "CST-JOB-004",
+      "CTL-JOB-002"
+    ]
+  }
+}

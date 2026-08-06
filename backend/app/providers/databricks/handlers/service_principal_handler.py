@@ -23,6 +23,25 @@ class ServicePrincipalResourceHandler(BaseResourceHandler, SupportsDisable, Supp
 
     resource_type = "service_principal"
 
+    discovered_fields = {
+        "id": "The SCIM ID.",
+        "name": "The display name, or null.",
+        "type": 'Always "service_principal".',
+        "owner": "The display name again. A service principal has no separate owner.",
+        "active": "Whether the principal is enabled.",
+        "application_id": "The application ID, or null.",
+        "entitlements": (
+            "SCIM entitlement values, such as allow-cluster-create or "
+            "databricks-sql-access. What the principal may do in this workspace."
+        ),
+        "roles": (
+            "SCIM role values. This is where account_admin appears, and it is "
+            "populated only when the client is bound to the account rather than "
+            "a single workspace — expect it to be empty on a workspace client."
+        ),
+        "tags": "Always empty. SCIM exposes no tags.",
+    }
+
     async def discover(self) -> List[Dict[str, Any]]:
         resources = []
         for sp in self.workspace_client.service_principals.list():
@@ -35,10 +54,23 @@ class ServicePrincipalResourceHandler(BaseResourceHandler, SupportsDisable, Supp
                     "owner": getattr(sp, "display_name", "unknown"),
                     "active": bool(getattr(sp, "active", True)),
                     "application_id": getattr(sp, "application_id", None),
+                    "entitlements": self._values(getattr(sp, "entitlements", None)),
+                    "roles": self._values(getattr(sp, "roles", None)),
                     "tags": {},
                 }
             )
         return resources
+
+    @staticmethod
+    def _values(items: Any) -> List[str]:
+        """SCIM complex attributes are {value, display, ...}; rules want the values."""
+        return sorted(
+            {
+                str(getattr(item, "value", "") or "")
+                for item in (items or [])
+                if getattr(item, "value", None)
+            }
+        )
 
     async def disable(self, resource_id: str, *, authorization=None) -> Dict[str, Any]:
         current = await asyncio.to_thread(

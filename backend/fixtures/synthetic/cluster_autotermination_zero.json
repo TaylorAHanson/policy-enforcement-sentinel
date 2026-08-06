@@ -1,0 +1,36 @@
+{
+  "description": "The other way discovery reports a disabled autotermination. CST-CLU-004 originally tested only for 0 and let every null-valued cluster through, so this fixture and the one above have to fire together or the fix regressed.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "0101-000000-aaaa",
+    "name": "analytics",
+    "type": "cluster",
+    "owner": "analytics@company.com",
+    "state": "RUNNING",
+    "cluster_type": "interactive",
+    "access_mode": "USER_ISOLATION",
+    "autotermination_minutes": 0,
+    "policy_id": "E0123456789",
+    "num_workers": 2,
+    "autoscale_max_workers": null,
+    "idle_days": 0,
+    "tags": {
+      "cost-center": "CC-4100",
+      "owner": "data-platform@company.com"
+    }
+  },
+  "expect": {
+    "fires": [
+      "CST-CLU-004"
+    ],
+    "passes": [
+      "CST-CLU-003",
+      "CST-CLU-005",
+      "CTL-CLU-002",
+      "SEC-CLU-001"
+    ]
+  }
+}

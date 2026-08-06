@@ -139,7 +139,10 @@ If the policies directory is itself a git checkout, as it is when you run
 locally from a clone, the sync leaves it alone rather than overwriting the work
 in your tree.
 
-To enable this, configure the following in your `.env` (for local dev) or `databricks.yml` (for production):
+To enable this, either fill in the **GitHub** section of the Settings page — the
+token, repository, branch, and policies directory are all editable there, and
+take effect on the next request with no restart — or set the environment
+directly in your `.env` (for local dev) or `databricks.yml` (for production):
 
 ```yaml
 env:
@@ -157,6 +160,12 @@ The token needs read and write access to repository contents and pull requests.
 If your organisation enforces SAML single sign-on, the token must additionally
 be authorised for that organisation, or every request will be refused with a
 403 that has nothing to do with the token's permissions.
+
+A token saved in Settings is stored server-side and never returned to the
+browser; the field shows only whether one is configured and its last four
+characters. The repository, branch, and directory are gated behind a typed
+confirmation there, because changing them changes which rules govern the estate:
+the next sync replaces the working copy with whatever the new location holds.
 
 ### Supported Resources
 

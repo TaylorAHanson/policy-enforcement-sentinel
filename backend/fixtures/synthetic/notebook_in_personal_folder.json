@@ -1,0 +1,24 @@
+{
+  "description": "A notebook under /Users, which CTL-NBK-002 exists to find. It still does not fire -- the rule reads `path`, and the handler puts that value in `id`.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "/Users/someone@company.com/prod-load",
+    "name": "prod-load",
+    "type": "notebook",
+    "owner": "someone@company.com",
+    "language": "PYTHON",
+    "in_shared": false,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [],
+    "passes": [
+      "CTL-NBK-002",
+      "CTL-NBK-003",
+      "SEC-NBK-001"
+    ]
+  }
+}

@@ -20,6 +20,19 @@ class SqlWarehouseResourceHandler(
 
     resource_type = "sql_warehouse"
 
+    discovered_fields = {
+        "id": "The warehouse ID.",
+        "name": "The warehouse name.",
+        "type": 'Always "sql_warehouse".',
+        "owner": "The email of whoever created the warehouse.",
+        "state": "RUNNING, STOPPED, STARTING and so on.",
+        "auto_stop_mins": "Idle minutes before auto-stop, or null when it is disabled.",
+        "max_num_clusters": "Upper bound of the scaling range, or null.",
+        "warehouse_type": "PRO, CLASSIC, and so on. May be an empty string.",
+        "serverless": "Whether serverless compute is enabled.",
+        "tags": "Custom tags as a string map.",
+    }
+
     async def discover(self) -> List[Dict[str, Any]]:
         resources = []
         for warehouse in self.workspace_client.warehouses.list():

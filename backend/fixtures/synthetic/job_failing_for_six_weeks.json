@@ -1,0 +1,34 @@
+{
+  "description": "Every run has failed for 42 days. The streak is measured from the oldest unbroken failure, so a job that failed for a month and was then fixed reports nothing at all.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "884422",
+    "name": "nightly-load",
+    "type": "job",
+    "owner": "svc-etl@company.com",
+    "schedule": "0 0 2 * * ?",
+    "paused": false,
+    "max_concurrent_runs": 1,
+    "owner_type": "service_principal",
+    "idle_days": 1,
+    "tags": {
+      "cost-center": "CC-4100",
+      "owner": "data-platform@company.com"
+    },
+    "failed_consecutively_days": 42
+  },
+  "expect": {
+    "fires": [
+      "CTL-JOB-002",
+      "CTL-JOB-005"
+    ],
+    "passes": [
+      "CST-JOB-003",
+      "CST-JOB-004",
+      "SEC-JOB-001"
+    ]
+  }
+}

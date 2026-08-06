@@ -33,9 +33,14 @@ jobs:
 
       # Kept as a separate step so a failure here is unmistakable in the run
       # summary: these are the guards on the non-destructive-by-default model.
+      #
+      # This pointed at tests/unit/safety/, which holds only __init__.py. pytest
+      # exits 5 on an empty collection, so the step was red rather than silently
+      # green — but a permanently red gate gets ignored the same way a vacuous
+      # one does.
       - name: Safety suite
         working-directory: backend
-        run: pytest tests/unit/safety/ -v -m safety
+        run: pytest tests/safety/ -v -m safety
 
   frontend:
     name: Frontend build

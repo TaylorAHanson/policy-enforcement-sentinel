@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List
 
-from app.providers.databricks import destructive, permissions
+from app.providers.databricks import activity, destructive, permissions
 from app.providers.databricks.handlers.base import (
     BaseResourceHandler,
     SupportsRevokeAccess,
@@ -25,31 +25,51 @@ class ClusterResourceHandler(
 
     resource_type = "cluster"
 
+    discovered_fields = {
+        "id": "The cluster ID.",
+        "name": "The cluster name.",
+        "type": 'Always "cluster".',
+        "owner": "The email of whoever created the cluster.",
+        "state": "RUNNING, TERMINATED, PENDING and so on.",
+        "cluster_type": '"job" for a cluster created by a job run, "interactive" otherwise.',
+        "access_mode": "The data security mode, e.g. SINGLE_USER or USER_ISOLATION. May be an empty string.",
+        "autotermination_minutes": "Idle minutes before auto-termination, or null when it is disabled.",
+        "policy_id": "The attached compute policy, or **null** when there is none. Use common.is_set to test it.",
+        "num_workers": "Fixed worker count, or null when the cluster autoscales.",
+        "autoscale_max_workers": "Upper bound when autoscaling, or null for a fixed-size cluster.",
+        "idle_days": (
+            "Days since the cluster last ran. Zero while it is running. Absent "
+            "when it is terminated but the API reported no termination time."
+        ),
+        "tags": "Custom tags as a string map.",
+    }
+
     async def discover(self) -> List[Dict[str, Any]]:
         resources = []
         # Errors propagate on purpose: an auth failure here must not look like
         # a workspace with no clusters.
         for cluster in self.workspace_client.clusters.list():
             state = getattr(cluster, "state", None)
+            resource = {
+                "id": cluster.cluster_id,
+                "name": cluster.cluster_name,
+                "type": "cluster",
+                "owner": getattr(cluster, "creator_user_name", "unknown"),
+                "state": getattr(state, "value", "UNKNOWN") if state else "UNKNOWN",
+                "cluster_type": (
+                    "job" if getattr(cluster, "cluster_source", None) == "JOB" else "interactive"
+                ),
+                "access_mode": str(getattr(cluster, "data_security_mode", "") or ""),
+                "autotermination_minutes": getattr(cluster, "autotermination_minutes", None),
+                "policy_id": getattr(cluster, "policy_id", None),
+                "num_workers": getattr(cluster, "num_workers", None),
+                "autoscale_max_workers": getattr(
+                    getattr(cluster, "autoscale", None), "max_workers", None
+                ),
+                "tags": dict(getattr(cluster, "custom_tags", None) or {}),
+            }
             resources.append(
-                {
-                    "id": cluster.cluster_id,
-                    "name": cluster.cluster_name,
-                    "type": "cluster",
-                    "owner": getattr(cluster, "creator_user_name", "unknown"),
-                    "state": getattr(state, "value", "UNKNOWN") if state else "UNKNOWN",
-                    "cluster_type": (
-                        "job" if getattr(cluster, "cluster_source", None) == "JOB" else "interactive"
-                    ),
-                    "access_mode": str(getattr(cluster, "data_security_mode", "") or ""),
-                    "autotermination_minutes": getattr(cluster, "autotermination_minutes", None),
-                    "policy_id": getattr(cluster, "policy_id", None),
-                    "num_workers": getattr(cluster, "num_workers", None),
-                    "autoscale_max_workers": getattr(
-                        getattr(cluster, "autoscale", None), "max_workers", None
-                    ),
-                    "tags": dict(getattr(cluster, "custom_tags", None) or {}),
-                }
+                activity.merge_idle_days(resource, activity.cluster_idle_days(cluster))
             )
         return resources
 

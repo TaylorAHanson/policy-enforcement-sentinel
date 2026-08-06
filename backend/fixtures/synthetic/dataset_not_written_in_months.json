@@ -1,0 +1,46 @@
+{
+  "description": "No writes for 120 days, from `last_altered`. Worth being precise about what this does and does not say: it is silence from upstream, not disuse. A reference table read by every query and updated once a year looks exactly like this, which is why the rule warns rather than acts.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "prod.sales.orders",
+    "name": "orders",
+    "type": "dataset",
+    "owner": "data-platform@company.com",
+    "catalog": "prod",
+    "schema": "sales",
+    "table_type": "MANAGED",
+    "has_description": true,
+    "certified": false,
+    "quarantined": false,
+    "last_altered": "2026-07-01T00:00:00Z",
+    "idle_days": 120,
+    "all_columns_have_descriptions": true,
+    "tags": {
+      "owner_group": "data-platform",
+      "approver_group": "governance",
+      "domain": "sales",
+      "slo_sla": "99.9",
+      "data_classification": "internal",
+      "reliability_window": "7d"
+    }
+  },
+  "expect": {
+    "fires": [
+      "CTL-DST-001",
+      "CTL-DST-010"
+    ],
+    "passes": [
+      "CTL-DST-002",
+      "CTL-DST-003",
+      "CTL-DST-007",
+      "CTL-DST-008",
+      "CTL-DST-009",
+      "SEC-DST-004",
+      "SEC-DST-005",
+      "SEC-DST-006"
+    ]
+  }
+}

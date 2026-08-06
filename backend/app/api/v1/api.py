@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     release_notes,
     sentinel,
     settings,
+    testing,
 )
 
 api_router = APIRouter()
@@ -19,6 +20,7 @@ api_router.include_router(branding.router, prefix="/branding", tags=["branding"]
 api_router.include_router(allowlist.router, prefix="/allowlist", tags=["allowlist"])
 api_router.include_router(readme.router, prefix="/readme", tags=["readme"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
+api_router.include_router(testing.router, prefix="/testing", tags=["testing"])
 api_router.include_router(
     release_notes.router, prefix="/release-notes", tags=["release-notes"]
 )

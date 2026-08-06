@@ -1,0 +1,36 @@
+{
+  "description": "A cluster created without a compute policy. CTL-CLU-002 is the rule, and the policy_id arrives as JSON null rather than being absent -- which is what `not input.resource.policy_id` failed to detect before common.is_set existed. This is the regression test for that.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "0101-000000-aaaa",
+    "name": "analytics",
+    "type": "cluster",
+    "owner": "analytics@company.com",
+    "state": "RUNNING",
+    "cluster_type": "interactive",
+    "access_mode": "USER_ISOLATION",
+    "autotermination_minutes": 30,
+    "policy_id": null,
+    "num_workers": 2,
+    "autoscale_max_workers": null,
+    "idle_days": 0,
+    "tags": {
+      "cost-center": "CC-4100",
+      "owner": "data-platform@company.com"
+    }
+  },
+  "expect": {
+    "fires": [
+      "CTL-CLU-002"
+    ],
+    "passes": [
+      "CST-CLU-003",
+      "CST-CLU-004",
+      "CST-CLU-005",
+      "SEC-CLU-001"
+    ]
+  }
+}

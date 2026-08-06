@@ -1,0 +1,32 @@
+{
+  "description": "Outside production the compute-policy rule is out of scope, which is the only reason this fixture can show a warehouse with nothing firing.",
+  "workspace": "synthetic-dev",
+  "workspace_type": "enterprise",
+  "environment": "dev",
+  "source": "authored",
+  "resource": {
+    "id": "wh-01",
+    "name": "analytics-wh",
+    "type": "sql_warehouse",
+    "owner": "data-platform@company.com",
+    "state": "RUNNING",
+    "auto_stop_mins": 20,
+    "max_num_clusters": 4,
+    "warehouse_type": "PRO",
+    "serverless": true,
+    "tags": {
+      "cost-center": "CC-4100",
+      "owner": "data-platform@company.com"
+    }
+  },
+  "expect": {
+    "fires": [],
+    "passes": [
+      "CST-WHS-002",
+      "CST-WHS-003",
+      "CST-WHS-004",
+      "CST-WHS-005",
+      "CTL-WHS-001"
+    ]
+  }
+}

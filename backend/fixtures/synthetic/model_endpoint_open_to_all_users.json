@@ -1,0 +1,33 @@
+{
+  "description": "An endpoint any user can query. Note the asymmetry the handler documents: an unreadable ACL also produces an empty `shared_with`, so this rule under-reports rather than flagging endpoints nobody could inspect.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "fraud-scorer",
+    "name": "fraud-scorer",
+    "type": "model_serving_endpoint",
+    "owner": "ml@company.com",
+    "endpoint_type": "EXTERNAL_MODEL",
+    "ready": "READY",
+    "scale_to_zero": true,
+    "inference_logging": true,
+    "shared_with": [
+      "ALL_USERS"
+    ],
+    "tags": {
+      "cost_center": "CC-4100"
+    }
+  },
+  "expect": {
+    "fires": [
+      "SEC-MSE-003"
+    ],
+    "passes": [
+      "CST-MSE-001",
+      "CST-MSE-002",
+      "CTL-MSE-004"
+    ]
+  }
+}

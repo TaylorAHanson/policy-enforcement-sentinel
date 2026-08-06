@@ -1,0 +1,27 @@
+{
+  "description": "The same personal-folder notebook that no job runs. CTL-NBK-002 is about production logic living somewhere fragile, not about where people keep their drafts, and this is the pair that holds it to that.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "/Users/someone@company.com/scratch",
+    "name": "scratch",
+    "type": "notebook",
+    "owner": "someone@company.com",
+    "path": "/Users/someone@company.com/scratch",
+    "language": "PYTHON",
+    "in_shared": false,
+    "in_git_folder": false,
+    "is_scheduled": false,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [],
+    "passes": [
+      "CTL-NBK-002",
+      "CTL-NBK-003",
+      "SEC-NBK-001"
+    ]
+  }
+}

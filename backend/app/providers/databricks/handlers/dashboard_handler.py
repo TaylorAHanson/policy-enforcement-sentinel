@@ -22,11 +22,27 @@ class DashboardResourceHandler(BaseResourceHandler, SupportsRevokeAccess, Suppor
 
     resource_type = "dashboard"
 
+    discovered_fields = {
+        "id": "The dashboard ID.",
+        "name": "The dashboard's display name.",
+        "type": 'Always "dashboard".',
+        "owner": "The email of whoever created the dashboard.",
+        "uses_embedded_credentials": "Whether the published dashboard runs as its publisher.",
+        "is_published": (
+            "Whether a published version exists. False also when the published "
+            "lookup failed, so a rule using it should be about published "
+            "dashboards rather than about drafts."
+        ),
+        "shared_with": 'Group names it is shared with. Contains "ALL_USERS" when shared workspace-wide.',
+        "tags": "Always empty. Lakeview dashboards carry no tags.",
+    }
+
     async def discover(self) -> List[Dict[str, Any]]:
         resources = []
         for dash in self.workspace_client.lakeview.list():
             uses_embedded_credentials = getattr(dash, "uses_embedded_credentials", False)
             shared_with: List[str] = list(getattr(dash, "shared_with", None) or [])
+            is_published = False
 
             # These two lookups are per-dashboard enrichment, not discovery. A
             # failure means we know less about one dashboard, not that discovery
@@ -35,6 +51,9 @@ class DashboardResourceHandler(BaseResourceHandler, SupportsRevokeAccess, Suppor
                 published = await asyncio.to_thread(
                     self.workspace_client.lakeview.get_published, dash.dashboard_id
                 )
+                # Reaching here at all means a published version exists; the API
+                # raises rather than returning an empty answer when it does not.
+                is_published = True
                 if getattr(published, "embed_credentials", False):
                     uses_embedded_credentials = True
             except Exception as e:
@@ -77,6 +96,7 @@ class DashboardResourceHandler(BaseResourceHandler, SupportsRevokeAccess, Suppor
                     "type": "dashboard",
                     "owner": getattr(dash, "creator_user_name", "unknown"),
                     "uses_embedded_credentials": uses_embedded_credentials,
+                    "is_published": is_published,
                     "shared_with": sorted(set(shared_with)),
                     "tags": {},
                 }

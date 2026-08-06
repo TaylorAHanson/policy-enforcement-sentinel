@@ -1,0 +1,28 @@
+{
+  "description": "A published dashboard that embeds its publisher's credentials and is shared with everyone. Both halves of SEC-DSH-001 are fields the handler really collects, which makes this the one dashboard rule that can fire in anger.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "dsh-001",
+    "name": "Revenue overview",
+    "type": "dashboard",
+    "owner": "analytics@company.com",
+    "uses_embedded_credentials": true,
+    "is_published": true,
+    "shared_with": [
+      "ALL_USERS"
+    ],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "SEC-DSH-001"
+    ],
+    "passes": [
+      "CTL-DSH-002",
+      "CTL-DSH-003"
+    ]
+  }
+}

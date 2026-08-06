@@ -3,6 +3,7 @@ import {
   BookOpen,
   Code,
   ExternalLink,
+  FlaskConical,
   MonitorPlay,
   Settings,
   Shield,
@@ -24,8 +25,9 @@ interface NavItem {
 
 const PRIMARY_NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: Shield, end: true },
-  { to: "/policies", label: "Policy Editor", icon: Code },
+  { to: "/policies", label: "Policies", icon: Code },
   { to: "/allowlist", label: "Allowlist", icon: ShieldCheck },
+  { to: "/testing", label: "Testing Center", icon: FlaskConical },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 

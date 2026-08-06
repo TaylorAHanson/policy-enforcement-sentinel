@@ -81,6 +81,59 @@ def _package_of(content: str) -> str:
     return path[len(prefix):] if path.startswith(prefix) else path.rsplit(".", 1)[-1]
 
 
+def proposal_filename(content: str, target_policy: Optional[str] = None) -> str:
+    """What the draft would be called if it were saved."""
+    package = _package_of(content)
+    name = target_policy or (f"{package}.rego" if package else "generated.rego")
+    return name if name.endswith(".rego") else f"{name}.rego"
+
+
+async def check_rego(content: str, policy_name: str) -> List[str]:
+    """``opa check`` a candidate against a copy of the real policies directory.
+
+    Returns the errors, empty when it compiles. A missing or broken OPA binary
+    is reported as an error rather than raised: it is an environment problem,
+    and returning the draft clearly marked as unvalidated beats showing the user
+    nothing.
+    """
+    from app.core.config import settings
+    from app.providers.opa.client import OpaProvider
+
+    opa = OpaProvider(settings.opa_provider_config())
+    try:
+        result = await opa.check(policy_name, content)
+    except Exception as e:
+        logger.warning("Could not validate generated Rego: %s", e)
+        return [f"Could not run `opa check`: {e}"]
+
+    if result.get("valid"):
+        return []
+    return [str(e) for e in (result.get("errors") or ["unknown validation error"])]
+
+
+def build_proposal(
+    content: str,
+    *,
+    target_policy: Optional[str] = None,
+    errors: Optional[List[str]] = None,
+    guardrails: Optional[GuardrailReport] = None,
+    attempts: int = 1,
+) -> AuthoredPolicy:
+    """Assemble the record for a draft that has already been checked."""
+    policy_name = proposal_filename(content, target_policy)
+    errors = list(errors or [])
+    return AuthoredPolicy(
+        content=content,
+        policy_name=policy_name,
+        package=_package_of(content),
+        is_new_file=_is_new_file(policy_name),
+        valid=not errors,
+        validation_errors=errors,
+        guardrails=guardrails,
+        attempts=attempts,
+    )
+
+
 async def author_rego(
     instruction: str,
     *,
@@ -97,9 +150,6 @@ async def author_rego(
     Raises :class:`app.agents.guardrails.GuardrailViolation` if the model asks
     for more than Tier 2.
     """
-    from app.core.config import settings
-    from app.providers.opa.client import OpaProvider
-
     client = llm or AgentLLMClient()
     system = prompts.authoring_system_prompt()
 
@@ -113,7 +163,6 @@ async def author_rego(
         )
     user = "\n".join(request)
 
-    opa = OpaProvider(settings.opa_provider_config())
     errors: List[str] = []
     content = ""
     attempt = 0
@@ -126,26 +175,12 @@ async def author_rego(
             errors = ["The assistant returned an empty policy."]
             break
 
-        package = _package_of(content)
-        candidate_name = target_policy or (f"{package}.rego" if package else "generated.rego")
-        if not candidate_name.endswith(".rego"):
-            candidate_name += ".rego"
-
-        try:
-            result = await opa.check(candidate_name, content)
-        except Exception as e:
-            logger.warning("Could not validate generated Rego: %s", e)
-            # An unavailable OPA binary is an environment problem, not a problem
-            # with the policy. Returning the draft unvalidated, clearly marked,
-            # beats refusing to show the user anything.
-            errors = [f"Could not run `opa check`: {e}"]
+        errors = await check_rego(content, proposal_filename(content, target_policy))
+        if not errors:
+            break
+        if errors[0].startswith("Could not run `opa check`"):
             break
 
-        if result.get("valid"):
-            errors = []
-            break
-
-        errors = [str(e) for e in (result.get("errors") or ["unknown validation error"])]
         if attempt < _MAX_VALIDATION_ATTEMPTS:
             logger.info("Generated Rego failed validation; retrying once. %s", errors)
             user = (
@@ -159,18 +194,10 @@ async def author_rego(
     # the user should be told that rather than shown a syntax error.
     report = check_generated_policy(content)
 
-    package = _package_of(content)
-    policy_name = target_policy or (f"{package}.rego" if package else "generated.rego")
-    if not policy_name.endswith(".rego"):
-        policy_name += ".rego"
-
-    return AuthoredPolicy(
-        content=content,
-        policy_name=policy_name,
-        package=package,
-        is_new_file=_is_new_file(policy_name),
-        valid=not errors,
-        validation_errors=errors,
+    return build_proposal(
+        content,
+        target_policy=target_policy,
+        errors=errors,
         guardrails=report,
         attempts=attempt,
     )

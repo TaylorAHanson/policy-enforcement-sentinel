@@ -1,0 +1,27 @@
+{
+  "description": "A notebook in a Git folder that no job runs. Nothing fires, which is the baseline the two rules below are measured against.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "/Shared/etl/bronze",
+    "name": "bronze",
+    "type": "notebook",
+    "owner": "data-platform@company.com",
+    "path": "/Shared/etl/bronze",
+    "language": "PYTHON",
+    "in_shared": true,
+    "in_git_folder": true,
+    "is_scheduled": false,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [],
+    "passes": [
+      "CTL-NBK-002",
+      "CTL-NBK-003",
+      "SEC-NBK-001"
+    ]
+  }
+}

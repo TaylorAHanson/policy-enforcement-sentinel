@@ -129,7 +129,21 @@ change that makes them stale:
 
 - Backend: `cd backend && source venv/bin/activate && pytest`
 - Frontend: `npm run build` (typecheck via `tsc`) and `npm run lint`
-- The safety suite in `backend/tests/unit/safety/` must never go red. Several of
+- The safety suite in `backend/tests/safety/` must never go red. Several of
   those tests are written to fail on a *future* careless change rather than on
   current behavior — if one breaks, the correct response is almost never to
   update the test.
+- Policy changes want a fixture in `backend/fixtures/synthetic/` naming the rules
+  that should and should not fire. `test_synthetic_estate.py` runs every
+  committed fixture against the live policies, so a fixture is a regression test
+  for the rule it describes. The Testing Center page, and the Tests tab in the
+  Policy Editor, run the same thing on demand — the editor against your unsaved
+  draft rather than the committed file.
+- A rule with no fixture is an *untested* rule, not a passing one, and the two
+  are indistinguishable on a green page. `/testing/coverage` reports which is
+  which. 59 of 64 shipped rules currently have no fixture.
+- **A rule may only test fields some handler actually collects.** Rego does not
+  error on a reference to data that was never supplied — the rule silently never
+  fires and every resource reads as compliant, permanently. Handlers declare
+  `discovered_fields`; see `backend/AGENTS.md`. If a request needs data nobody
+  gathers, the handler change comes first, and there is no policy-only shortcut.

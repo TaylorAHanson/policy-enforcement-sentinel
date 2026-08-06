@@ -1,0 +1,28 @@
+{
+  "description": "Outside enterprise production the risk-review rule is out of scope, which leaves the curated-tables rule on its own.",
+  "workspace": "synthetic-dev",
+  "workspace_type": "enterprise",
+  "environment": "dev",
+  "source": "authored",
+  "resource": {
+    "id": "gs-001",
+    "name": "Sales assistant",
+    "type": "genie_space",
+    "owner": "analytics@company.com",
+    "description": "Answers sales questions.",
+    "shared_with": [
+      "sales-team"
+    ],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CTL-GEN-003"
+    ],
+    "passes": [
+      "CST-GEN-004",
+      "SEC-GEN-001",
+      "SEC-GEN-002"
+    ]
+  }
+}

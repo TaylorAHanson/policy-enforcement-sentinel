@@ -1,0 +1,32 @@
+{
+  "description": "A service principal holding account admin. SCIM files this under `roles`, which is only populated when the client is bound to the account -- so against a workspace-scoped client this rule sees nothing and stays quiet.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "sp-99",
+    "name": "svc-etl",
+    "type": "service_principal",
+    "owner": "svc-etl",
+    "active": true,
+    "application_id": "abc-123",
+    "entitlements": [
+      "allow-cluster-create"
+    ],
+    "roles": [
+      "account_admin"
+    ],
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "SEC-SPN-002"
+    ],
+    "passes": [
+      "CTL-SPN-003",
+      "SEC-SPN-001",
+      "SEC-SPN-004"
+    ]
+  }
+}

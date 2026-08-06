@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List
 
-from app.providers.databricks import destructive, permissions
+from app.providers.databricks import destructive, identity, permissions
 from app.providers.databricks.handlers.base import (
     BaseResourceHandler,
     SupportsDelete,
@@ -23,6 +23,32 @@ class PipelineResourceHandler(
     """
 
     resource_type = "pipeline"
+
+    discovered_fields = {
+        "id": "The pipeline ID.",
+        "name": "The pipeline name.",
+        "type": 'Always "pipeline".',
+        "owner": "The email of whoever created the pipeline.",
+        "serverless": "Whether the pipeline runs serverless.",
+        "continuous": "Whether it runs continuously rather than triggered.",
+        "channel": "CURRENT or PREVIEW.",
+        "development": "Whether it is in development mode.",
+        "owner_type": (
+            '"user", "service_principal", or "unknown" when the API named '
+            "neither. Describes who the pipeline runs as, not who created it."
+        ),
+        "target_catalog": (
+            "The Unity Catalog catalog it publishes to, or \"hive_metastore\" "
+            "when it publishes to the legacy metastore instead. Empty when it "
+            "publishes nowhere."
+        ),
+        "metadata_complete": (
+            "False when the per-pipeline detail fetch failed, in which case every "
+            "field below `owner` is absent. A rule that must not fire on incomplete "
+            "data should check this first."
+        ),
+        "tags": "Pipeline tags as a string map.",
+    }
 
     async def discover(self) -> List[Dict[str, Any]]:
         resources = []
@@ -47,6 +73,11 @@ class PipelineResourceHandler(
                         "continuous": bool(getattr(spec, "continuous", False)) if spec else False,
                         "channel": str(getattr(spec, "channel", "CURRENT")) if spec else "CURRENT",
                         "development": bool(getattr(spec, "development", False)) if spec else False,
+                        "owner_type": identity.owner_type(
+                            getattr(details, "run_as", None),
+                            getattr(details, "run_as_user_name", None),
+                        ),
+                        "target_catalog": self._target_catalog(spec),
                         "tags": tags,
                         "metadata_complete": True,
                     }
@@ -66,6 +97,24 @@ class PipelineResourceHandler(
                     }
                 )
         return resources
+
+    @staticmethod
+    def _target_catalog(spec: Any) -> str:
+        """Where the pipeline publishes, named the way the rule asks about it.
+
+        The API does not have a "which metastore" field. A Unity Catalog
+        pipeline sets `catalog`; a legacy one leaves it empty and sets `target`
+        to a Hive schema. So the absence of one field alongside the presence of
+        the other is what identifies the legacy case.
+        """
+        if spec is None:
+            return ""
+        catalog = str(getattr(spec, "catalog", "") or "").strip()
+        if catalog:
+            return catalog
+        if str(getattr(spec, "target", "") or "").strip():
+            return "hive_metastore"
+        return ""
 
     async def disable(self, resource_id: str, *, authorization=None) -> Dict[str, Any]:
         details = await asyncio.to_thread(

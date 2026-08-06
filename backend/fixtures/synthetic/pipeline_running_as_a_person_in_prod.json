@@ -1,0 +1,32 @@
+{
+  "description": "A production pipeline running as its author rather than a service principal, so it stops working the day they leave.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "pl-001",
+    "name": "bronze-to-silver",
+    "type": "pipeline",
+    "owner": "someone@company.com",
+    "serverless": true,
+    "continuous": false,
+    "channel": "CURRENT",
+    "development": false,
+    "owner_type": "user",
+    "target_catalog": "prod",
+    "metadata_complete": true,
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "SEC-PIP-004"
+    ],
+    "passes": [
+      "CST-PIP-001",
+      "CST-PIP-005",
+      "CTL-PIP-002",
+      "CTL-PIP-003"
+    ]
+  }
+}

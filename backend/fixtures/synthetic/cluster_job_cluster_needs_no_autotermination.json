@@ -1,0 +1,35 @@
+{
+  "description": "A job cluster with no autotermination, which is correct -- it dies with its run. CST-CLU-004 is scoped to interactive compute, and this is the pair that proves the scoping is real.",
+  "workspace": "synthetic-prod",
+  "workspace_type": "enterprise",
+  "environment": "prod",
+  "source": "authored",
+  "resource": {
+    "id": "0101-000000-aaaa",
+    "name": "analytics",
+    "type": "cluster",
+    "owner": "analytics@company.com",
+    "state": "RUNNING",
+    "cluster_type": "job",
+    "access_mode": "USER_ISOLATION",
+    "autotermination_minutes": null,
+    "policy_id": "E0123456789",
+    "num_workers": 2,
+    "autoscale_max_workers": null,
+    "idle_days": 0,
+    "tags": {
+      "cost-center": "CC-4100",
+      "owner": "data-platform@company.com"
+    }
+  },
+  "expect": {
+    "fires": [],
+    "passes": [
+      "CST-CLU-003",
+      "CST-CLU-004",
+      "CST-CLU-005",
+      "CTL-CLU-002",
+      "SEC-CLU-001"
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "description": "A development endpoint holding capacity around the clock. `scale_to_zero` is true only when every served model scales down, so one always-warm model among several is enough to trip this.",
+  "workspace": "synthetic-dev",
+  "workspace_type": "enterprise",
+  "environment": "dev",
+  "source": "authored",
+  "resource": {
+    "id": "fraud-scorer",
+    "name": "fraud-scorer",
+    "type": "model_serving_endpoint",
+    "owner": "ml@company.com",
+    "endpoint_type": "EXTERNAL_MODEL",
+    "ready": "READY",
+    "scale_to_zero": false,
+    "inference_logging": true,
+    "shared_with": [
+      "ml-consumers"
+    ],
+    "tags": {
+      "cost_center": "CC-4100"
+    }
+  },
+  "expect": {
+    "fires": [
+      "CST-MSE-002"
+    ],
+    "passes": [
+      "CST-MSE-001",
+      "CTL-MSE-004",
+      "SEC-MSE-003"
+    ]
+  }
+}

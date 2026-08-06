@@ -59,6 +59,46 @@ def _acl_entry_to_dict(entry: Any) -> Dict[str, Any]:
     }
 
 
+#: Group names that mean "everybody in the workspace". Databricks spells this
+#: differently depending on the API and the account, and a rule about broad
+#: sharing that only recognised one spelling would miss the other two.
+_EVERYONE_GROUPS = {"users", "account users", "all_users", "all users"}
+
+
+def shared_with(workspace_client, resource_type: str, resource_id: str) -> List[str]:
+    """Groups a resource is shared with, for discovery rather than remediation.
+
+    Returns ``["ALL_USERS", ...]`` when one of the groups is the everybody
+    group, which is the form the policies test for.
+
+    Read-only, and raises nothing the caller must handle beyond what the API
+    raises: a handler enriching a resource with this should guard the call, so
+    one inaccessible ACL costs one resource's detail rather than the scan.
+
+    Note the asymmetry with :func:`capture_permissions`, which is deliberate:
+    that one is part of an undo record and must be exact, while this is
+    evidence for a rule and is allowed to be partial.
+    """
+    object_type = REQUEST_OBJECT_TYPES.get(resource_type)
+    if not object_type:
+        return []
+
+    current = workspace_client.permissions.get(
+        request_object_type=object_type, request_object_id=resource_id
+    )
+
+    groups: List[str] = []
+    for entry in getattr(current, "access_control_list", None) or []:
+        group_name = getattr(entry, "group_name", None)
+        if not group_name:
+            continue
+        if group_name.strip().lower() in _EVERYONE_GROUPS:
+            groups.append("ALL_USERS")
+        else:
+            groups.append(group_name)
+    return sorted(set(groups))
+
+
 def capture_permissions(workspace_client, resource_type: str, resource_id: str) -> Dict[str, Any]:
     """Snapshot the current ACL so a later change can be undone."""
     object_type = REQUEST_OBJECT_TYPES.get(resource_type)

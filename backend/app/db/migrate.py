@@ -180,8 +180,38 @@ def _m_allowlist_expiry(engine: Engine) -> None:
     add_column(engine, "allowlist", "expires_at", "TIMESTAMP")
 
 
+def _m_allowlist_patterns(engine: Engine) -> None:
+    """Exceptions gained a second shape: one rule, one resource type, one workspace.
+
+    The backfill is the safety-critical part. Every row that predates this
+    change waives one named resource, and a null ``match_type`` reaching Rego
+    would be read by ``object.get(e, "match_type", "resource")`` as a resource
+    row anyway — but relying on that default in two places, one of which is a
+    policy file anyone can edit, is not a guarantee. So the value is written
+    down.
+
+    ``resource_id`` is deliberately not made nullable here. Dropping NOT NULL is
+    a destructive schema change on some engines, and it is not needed: the
+    column was created nullable by ``create_all`` on any database made after
+    this, and a pattern row on an older one fails loudly at insert rather than
+    quietly writing a waiver with a missing selector.
+    """
+    add_column(engine, "allowlist", "match_type", "VARCHAR", default="'resource'")
+    add_column(engine, "allowlist", "rule_id", "VARCHAR")
+    add_column(engine, "allowlist", "created_by", "VARCHAR")
+
+    backfill(
+        engine,
+        "UPDATE allowlist SET match_type = 'resource' WHERE match_type IS NULL",
+        "marked pre-existing exceptions as resource-scoped",
+    )
+
+    add_index(engine, "allowlist", "ix_allowlist_match", ["match_type", "rule_id"])
+
+
 MIGRATIONS: List[Tuple[str, Callable[[Engine], None]]] = [
     ("allowlist_expiry", _m_allowlist_expiry),
+    ("allowlist_patterns", _m_allowlist_patterns),
     ("run_counters", _m_run_counters),
     ("finding_safety_columns", _m_finding_safety_columns),
     ("finding_indexes", _m_finding_indexes),
