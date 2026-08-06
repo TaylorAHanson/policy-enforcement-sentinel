@@ -1,5 +1,5 @@
 {
-  "description": "A cluster that meets every rule it is possible to meet. The one fixture whose failure means a policy has widened rather than narrowed.",
+  "description": "A cluster that meets every rule it is possible to meet. The one test whose failure means a policy has widened rather than narrowed.",
   "workspace": "synthetic-prod",
   "workspace_type": "enterprise",
   "environment": "prod",

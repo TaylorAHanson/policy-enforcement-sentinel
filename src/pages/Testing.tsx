@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   Camera,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Filter,
   FlaskConical,
   Play,
   RefreshCw,
@@ -42,17 +43,27 @@ import { cn } from "../lib/utils";
 /**
  * Running the tests without leaving the app.
  *
- * Two things live here, and they answer different questions. A fixture run asks
- * "does this rule fire on the thing I think it fires on", by putting made-up
- * resources through the real policies, the real action ladder, and real OPA.
- * The pytest run asks "is the application still correct". Neither touches a
- * workspace: the fixture runner has no client to touch one with.
+ * Two things live here, and they answer different questions. A policy test asks
+ * "does this rule fire on the thing I think it fires on", by putting one
+ * resource through the real policies, the real action ladder, and real OPA. The
+ * pytest run asks "is the application still correct". Neither touches a
+ * workspace: the policy test runner has no client to touch one with.
+ *
+ * The word is "test" rather than "fixture" throughout the interface. A fixture
+ * is the input half of a test and the name is accurate, but only to somebody
+ * who already knows the harness — and the people who most need this page are
+ * the ones who do not.
+ *
+ * The page is ordered by how fast things change, not by how much detail they
+ * carry. A run result is about what you just did and is stale in a minute; rule
+ * coverage moves once a week and is mostly not the reader's to act on. Showing
+ * them at the same weight made a standing metric look like an error message.
  */
 
-type Tab = "fixtures" | "pytest";
+type Tab = "policy" | "pytest";
 
 export default function Testing() {
-  const [tab, setTab] = useState<Tab>("fixtures");
+  const [tab, setTab] = useState<Tab>("policy");
 
   return (
     <div className="mx-auto flex h-full max-w-6xl flex-col gap-4 p-6">
@@ -71,12 +82,34 @@ export default function Testing() {
         value={tab}
         onChange={(id) => setTab(id as Tab)}
         items={[
-          { id: "fixtures", label: "Policy fixtures" },
+          { id: "policy", label: "Policy tests" },
           { id: "pytest", label: "Application tests" },
         ]}
       />
 
-      {tab === "fixtures" ? <FixturePanel /> : <PytestPanel />}
+      {tab === "policy" ? <FixturePanel /> : <PytestPanel />}
+    </div>
+  );
+}
+
+/**
+ * What the page is for, for somebody who has not used it.
+ *
+ * Sits above the buttons because the first question is "what does this do",
+ * and the page previously opened with a red block of results to a question
+ * nobody had asked yet.
+ */
+function WhatThisIs() {
+  return (
+    <div className="rounded-md border border-border bg-surface-raised/50 px-3 py-2 text-xs leading-relaxed text-content-muted">
+      <span className="font-medium text-content">
+        A policy test is one resource plus the rules that should and should not
+        fire on it.
+      </span>{" "}
+      Run them after editing a policy, to confirm it still catches what you think
+      it catches and has not started flagging things it should leave alone. Write
+      them by hand for a case you have in mind, or capture them from a scan to
+      pin down how the policies treat resources you really have.
     </div>
   );
 }
@@ -93,6 +126,8 @@ function FixturePanel() {
   const [coverage, setCoverage] = useState<CoverageReport | null>(null);
   const [drift, setDrift] = useState<DriftReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** After a failing run, the list is usually only worth reading for failures. */
+  const [failuresOnly, setFailuresOnly] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -149,97 +184,92 @@ function FixturePanel() {
     return map;
   }, [run]);
 
+  const failedNames = useMemo(
+    () => (run?.results ?? []).filter((r) => !r.passed).map((r) => r.fixture),
+    [run],
+  );
+
+  const shown = useMemo(
+    () =>
+      failuresOnly
+        ? fixtures.filter((f) => failedNames.includes(f.name))
+        : fixtures,
+    [fixtures, failuresOnly, failedNames],
+  );
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 p-8 text-[13px] text-content-muted">
-        <Spinner /> Loading fixtures…
+        <Spinner /> Loading tests…
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-4">
+      <WhatThisIs />
+
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={runAll} disabled={running || !fixtures.length}>
           {running ? <Spinner /> : <Play />}
-          {running ? "Running…" : `Run ${fixtures.length} fixtures`}
+          {running ? "Running…" : `Run ${fixtures.length} tests`}
         </Button>
         <Button variant="outline" onClick={capture} disabled={capturing}>
           {capturing ? <Spinner /> : <Camera />}
-          Capture from last scan
+          Capture from a scan
         </Button>
         <Button variant="ghost" onClick={() => void load()}>
           <RefreshCw />
           Reload
         </Button>
-
-        {run && <RunSummary run={run} />}
       </div>
 
-      {/* Deliberately above the results. A page of green ticks answers "did the
-          fixtures pass", and it is easy to read that as "the policies work".
-          This is the number that says how much of the estate's rules those
-          ticks actually speak for. */}
+      {error && <ErrorState message={error} onRetry={() => void load()} />}
+
+      {/* What just happened, first. This is the only thing on the page that
+          changed because of something the reader did, and it was previously a
+          badge in the corner while a standing metric took the whole width. */}
+      {run && (
+        <RunResult
+          run={run}
+          failedNames={failedNames}
+          failuresOnly={failuresOnly}
+          onToggleFailures={() => setFailuresOnly(!failuresOnly)}
+        />
+      )}
+
+      {/* Then anything actionable that a run cannot tell you. Both of these are
+          real problems with the tests themselves, so they stay expanded. */}
       {coverage && coverage.only_synthetic > 0 && (
         <Alert
           tone="danger"
           title={`${coverage.only_synthetic} rules are tested with data that does not exist`}
         >
-          A fixture builds the input document directly, so it can hand a policy
-          a field no handler collects. These rules pass their fixture and are
-          still dead against a real workspace — worse than untested, because the
-          green tick reads as evidence. The fixtures doing it are{" "}
+          A test builds the input document directly, so it can hand a policy a
+          field no handler collects. These rules pass and are still dead against
+          a real workspace — worse than untested, because the green tick reads as
+          evidence. The tests doing it are{" "}
           {coverage.fixtures_inventing_fields.join(", ")}.
         </Alert>
       )}
 
-      {coverage && <RuleHealth coverage={coverage} />}
+      {drift?.available && drift.total > 0 && <CatalogueDrift drift={drift} />}
 
-      {/* Below rule health because it is the check on that check. Rule health
-          reads the field catalogue to decide a rule is working; this is the only
-          thing that can say the catalogue was wrong, which would make the panel
-          above confidently incorrect rather than merely incomplete. */}
-      {drift && <CatalogueDrift drift={drift} />}
+      {/* Standing coverage, folded. It moves once a week and most of it is not
+          the reader's to act on; only the rules that look broken are hoisted. */}
+      {coverage && <CoverageFold coverage={coverage} />}
 
-      {error && <ErrorState message={error} onRetry={() => void load()} />}
-
-      {run && run.enforcement_enabled === false && (
-        <Alert tone="info" title="Enforcement is off">
-          A rule asking for WARN resolves to FLAG — recorded, nobody notified.
-          That is what these results show, and it is the setting the app ships
-          with. Turn enforcement on in Settings to see what each rule would
-          actually do.
-        </Alert>
-      )}
-
-      {captured && (
-        <Alert tone={captured.count ? "success" : "warning"} title="Capture">
-          {captured.count === 0 ? (
-            <>
-              Nothing to capture. Fixtures come from the resource snapshots a
-              scan records, so run a scan first.
-            </>
-          ) : (
-            <>
-              Wrote {captured.count} fixture
-              {captured.count === 1 ? "" : "s"} to{" "}
-              <code className="text-2xs">{captured.directory}</code>.{" "}
-              {captured.note} They are in the working copy only — commit them
-              through a pull request to keep them.
-            </>
-          )}
-        </Alert>
-      )}
+      <ContextStrip run={run} drift={drift} captured={captured} />
 
       {!fixtures.length ? (
         <EmptyState
           icon={<FlaskConical className="size-6" />}
-          title="No fixtures yet"
-          description="A fixture is one resource plus the rules that should and should not fire on it. Capture some from a scan, or add JSON files to backend/fixtures/synthetic/."
+          title="No policy tests yet"
+          description="A policy test is one resource plus the rules that should and should not fire on it. Capture some from a scan, or add JSON files to backend/fixtures/synthetic/."
         />
       ) : (
         <div className="flex flex-col gap-2">
-          {fixtures.map((fixture) => (
+          {shown.map((fixture) => (
             <FixtureRow
               key={fixture.name}
               fixture={fixture}
@@ -252,14 +282,168 @@ function FixturePanel() {
   );
 }
 
-function RunSummary({ run }: { run: SyntheticRun }) {
+/** The outcome of the run the reader just asked for. */
+function RunResult({
+  run,
+  failedNames,
+  failuresOnly,
+  onToggleFailures,
+}: {
+  run: SyntheticRun;
+  failedNames: string[];
+  failuresOnly: boolean;
+  onToggleFailures: () => void;
+}) {
+  if (!run.failed) {
+    return (
+      <Alert tone="success" title={`All ${run.total} tests passed`}>
+        Every rule these tests name fired where it should and stayed quiet where
+        it should not.
+      </Alert>
+    );
+  }
+
   return (
-    <div className="ml-auto flex items-center gap-2 text-[13px]">
-      <Badge variant={run.failed ? "danger" : "success"} size="md">
-        {run.failed ? <XCircle /> : <CheckCircle2 />}
-        {run.passed} of {run.total} passing
-      </Badge>
+    <Alert
+      tone="danger"
+      title={`${run.failed} of ${run.total} tests failed`}
+      action={
+        <Button variant="outline" size="sm" onClick={onToggleFailures}>
+          <Filter />
+          {failuresOnly ? "Show all tests" : "Show only failures"}
+        </Button>
+      }
+    >
+      <div className="flex flex-wrap gap-1.5">
+        {failedNames.map((name) => (
+          <code key={name} className="font-mono text-2xs text-danger">
+            {name}
+          </code>
+        ))}
+      </div>
+    </Alert>
+  );
+}
+
+/**
+ * How much the tests prove, out of the way until asked for.
+ *
+ * This was a full-width red block with a ✗ on it, which reads as "something
+ * just broke". Nothing broke — the number has been the same for days, and most
+ * of the gap needs an access grant or a handler rather than anything the reader
+ * can do from this page. The one part that is a live problem, a rule that looks
+ * broken, is hoisted out so it is visible without expanding.
+ */
+function CoverageFold({ coverage }: { coverage: CoverageReport }) {
+  const [open, setOpen] = useState(false);
+  const suspect = coverage.rules.filter((rule) => rule.category === "suspect");
+  const blocked = coverage.total - coverage.reachable - suspect.length;
+  const Chevron = open ? ChevronDown : ChevronRight;
+
+  return (
+    <div className="rounded-md border border-border">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-hover"
+      >
+        <Chevron className="size-3.5 shrink-0 text-content-subtle" />
+        <span className="text-xs font-medium text-content">
+          {coverage.reachable} of {coverage.total} rules proven
+        </span>
+        {suspect.length > 0 && (
+          <Badge variant="danger">
+            {suspect.length} {suspect.length === 1 ? "looks" : "look"} broken
+          </Badge>
+        )}
+        {blocked > 0 && (
+          <span className="text-2xs text-content-muted">
+            {blocked} blocked on access, a handler, or the platform
+          </span>
+        )}
+      </button>
+
+      {/* Always visible, collapsed or not. It is the only part of coverage that
+          is both wrong and fixable from here. */}
+      {!open && suspect.length > 0 && (
+        <ul className="border-t border-border px-3 py-2">
+          {suspect.map((rule) => (
+            <li key={rule.rule_id} className="text-2xs text-content-muted">
+              <code className="font-mono text-danger">{rule.rule_id}</code> —{" "}
+              {rule.title}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {open && (
+        <div className="border-t border-border p-3">
+          {/* Headless: the button above already says 45 of 64, and the panel's
+              own headline said the same thing again in different words. */}
+          <RuleHealth coverage={coverage} headless />
+        </div>
+      )}
     </div>
+  );
+}
+
+/**
+ * The conditions the results were produced under.
+ *
+ * Each of these was a full-width alert competing with the run result. They are
+ * standing facts about the environment rather than anything that just happened,
+ * so they belong in one quiet line under everything.
+ */
+function ContextStrip({
+  run,
+  drift,
+  captured,
+}: {
+  run: SyntheticRun | null;
+  drift: DriftReport | null;
+  captured: CaptureResult | null;
+}) {
+  const notes: ReactNode[] = [];
+
+  if (run && run.enforcement_enabled === false) {
+    notes.push(
+      <>
+        Enforcement is off, so a rule asking for WARN records a FLAG and notifies
+        nobody
+      </>,
+    );
+  }
+  if (drift && !drift.available) {
+    notes.push(<>the field catalogue is unchecked until a scan runs</>);
+  }
+  if (drift?.available && drift.total === 0) {
+    notes.push(<>the field catalogue matches the last scan</>);
+  }
+  if (captured) {
+    notes.push(
+      captured.count === 0 ? (
+        <>nothing to capture, because no scan has recorded any resources yet</>
+      ) : (
+        <>
+          {captured.count} captured test{captured.count === 1 ? "" : "s"} written
+          to your working copy, uncommitted
+        </>
+      ),
+    );
+  }
+
+  if (!notes.length) return null;
+
+  return (
+    <p className="text-2xs leading-relaxed text-content-subtle">
+      {notes.map((note, index) => (
+        <span key={index}>
+          {index > 0 && " · "}
+          {note}
+        </span>
+      ))}
+      .
+    </p>
   );
 }
 
@@ -393,21 +577,21 @@ const PROBLEMS: {
   {
     key: "wrongly_fired",
     title: "Expected to pass, fired",
-    detail: "A false positive: the rule flags something the fixture says is fine.",
+    detail: "A false positive: the rule flags something the test says is fine.",
     tone: "warning",
   },
   {
     key: "unexpected",
     title: "Fired without being expected to",
     detail:
-      "Either the rule is too broad or the fixture is out of date. Worth deciding which.",
+      "Either the rule is too broad or the test is out of date. Worth deciding which.",
     tone: "warning",
   },
   {
     key: "not_evaluated",
     title: "Named but never evaluated",
     detail:
-      "No policy produced a result for this rule. Usually a typo in the fixture, or a rule that no longer exists.",
+      "No policy produced a result for this rule. Usually a typo in the test, or a rule that no longer exists.",
     tone: "warning",
   },
 ];

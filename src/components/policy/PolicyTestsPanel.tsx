@@ -122,11 +122,11 @@ export function PolicyTestsPanel({
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={start} loading={running} disabled={running}>
             <Play />
-            {running ? "Running…" : "Run the fixtures"}
+            {running ? "Running…" : "Run the tests"}
           </Button>
 
           {resourceType && (
-            <Badge variant="outline">{resourceType} fixtures</Badge>
+            <Badge variant="outline">{resourceType} tests</Badge>
           )}
 
           {run && (
@@ -138,7 +138,7 @@ export function PolicyTestsPanel({
               {run.failed ? <XCircle /> : <CheckCircle2 />}
               {run.total
                 ? `${run.passed} of ${run.total} passing`
-                : "no fixtures ran"}
+                : "no tests ran"}
             </Badge>
           )}
         </div>
@@ -175,7 +175,7 @@ export function PolicyTestsPanel({
 
         {run && run.total === 0 && (
           <Alert tone="warning" title="Nothing was tested">
-            There are no fixtures for{" "}
+            There are no tests for{" "}
             <code>{resourceType ?? "this resource type"}</code>, so this run
             checked nothing. Add one in the{" "}
             <Link to="/testing" className="underline underline-offset-2">
@@ -220,7 +220,7 @@ function Coverage({
           title={`${fakeCovered.length} rule${fakeCovered.length === 1 ? " passes" : "s pass"} on invented data`}
         >
           <p className="mb-2">
-            The only fixture that makes{" "}
+            The only test that makes{" "}
             {fakeCovered.length === 1 ? "this rule" : "these rules"} fire sets a
             field no handler collects. It passes here and does nothing at all
             against a real workspace.
@@ -248,7 +248,7 @@ function Coverage({
           tone="info"
           title={`${noNegative.length} rule${noNegative.length === 1 ? "" : "s"} only ever tested firing`}
         >
-          No fixture shows{" "}
+          No test shows{" "}
           {noNegative.length === 1 ? "this rule" : "these rules"} leaving a
           compliant resource alone, which is how a rule that is too broad gets
           through.{" "}
@@ -263,7 +263,7 @@ function Coverage({
       {!uncovered.length && !noNegative.length && !fakeCovered.length && (
         <p className="flex items-center gap-1.5 text-2xs text-success">
           <CheckCircle2 className="size-3.5" aria-hidden />
-          Every rule in this policy has a fixture that expects it to fire and one
+          Every rule in this policy has a test that expects it to fire and one
           that expects it not to.
         </p>
       )}

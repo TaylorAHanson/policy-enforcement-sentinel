@@ -1,5 +1,5 @@
 {
-  "description": "The same privilege as the fixture above, arriving in `entitlements` instead. The rule is written twice, once against each field, because which one is populated depends on how the client was configured rather than on anything about the principal.",
+  "description": "The same privilege as the test above, arriving in `entitlements` instead. The rule is written twice, once against each field, because which one is populated depends on how the client was configured rather than on anything about the principal.",
   "workspace": "synthetic-prod",
   "workspace_type": "enterprise",
   "environment": "prod",

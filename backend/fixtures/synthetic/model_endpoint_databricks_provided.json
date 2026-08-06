@@ -1,5 +1,5 @@
 {
-  "description": "A Databricks-provided endpoint, recognised by its name prefix. The chargeback rule deliberately exempts these, and this is the fixture that keeps that exemption honest.",
+  "description": "A Databricks-provided endpoint, recognised by its name prefix. The chargeback rule deliberately exempts these, and this is the test that keeps that exemption honest.",
   "workspace": "synthetic-prod",
   "workspace_type": "enterprise",
   "environment": "prod",

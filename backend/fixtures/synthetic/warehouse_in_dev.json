@@ -1,5 +1,5 @@
 {
-  "description": "Outside production the compute-policy rule is out of scope, which is the only reason this fixture can show a warehouse with nothing firing.",
+  "description": "Outside production the compute-policy rule is out of scope, which is the only reason this test can show a warehouse with nothing firing.",
   "workspace": "synthetic-dev",
   "workspace_type": "enterprise",
   "environment": "dev",

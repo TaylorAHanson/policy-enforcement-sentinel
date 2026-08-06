@@ -1,5 +1,5 @@
 {
-  "description": "A pipeline still on classic compute. CST-PIP-001 read this through an `attributes` object the handler never produced, so it matched nothing at all until the path was corrected; this fixture is what keeps it honest.",
+  "description": "A pipeline still on classic compute. CST-PIP-001 read this through an `attributes` object the handler never produced, so it matched nothing at all until the path was corrected; this test is what keeps it honest.",
   "workspace": "synthetic-prod",
   "workspace_type": "enterprise",
   "environment": "prod",

@@ -1,5 +1,5 @@
 {
-  "description": "The pair for the fixture above. Same human creator, run-as set properly, and SEC-JOB-001 stays quiet. If this one ever fires, the handler has gone back to reading `creator_user_name`.",
+  "description": "The pair for the test above. Same human creator, run-as set properly, and SEC-JOB-001 stays quiet. If this one ever fires, the handler has gone back to reading `creator_user_name`.",
   "workspace": "synthetic-prod",
   "workspace_type": "enterprise",
   "environment": "prod",

@@ -1,5 +1,5 @@
 {
-  "description": "USER_ISOLATION is what the UI calls Standard, and it is the mode this rule wants people to move *to*. It is also the mode most likely to be read as \"shared\" by someone skimming, so this fixture exists to stop the next person widening the rule to include it.",
+  "description": "USER_ISOLATION is what the UI calls Standard, and it is the mode this rule wants people to move *to*. It is also the mode most likely to be read as \"shared\" by someone skimming, so this test exists to stop the next person widening the rule to include it.",
   "workspace": "synthetic-prod",
   "workspace_type": "enterprise",
   "environment": "prod",

@@ -253,3 +253,7 @@ backend/sentinel.db
 # Frontend Build Output
 backend/static/
 package-lock.json
+
+# Screenshots taken while checking a UI change. Useful in the moment, and they
+# are pictures of a real workspace's resource names.
+.screenshots/

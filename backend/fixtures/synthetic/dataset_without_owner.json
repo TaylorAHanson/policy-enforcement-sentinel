@@ -1,5 +1,5 @@
 {
-  "description": "A dataset whose owner came back empty. This used to be the fixture recording that CTL-DST-007 could not fire -- the rule was `not input.resource.owner`, and Rego treats an empty string as a value rather than as absence. `common.no_owner` now recognises all four shapes absence arrives in.",
+  "description": "A dataset whose owner came back empty. This used to be the test recording that CTL-DST-007 could not fire -- the rule was `not input.resource.owner`, and Rego treats an empty string as a value rather than as absence. `common.no_owner` now recognises all four shapes absence arrives in.",
   "workspace": "synthetic-prod",
   "workspace_type": "enterprise",
   "environment": "prod",

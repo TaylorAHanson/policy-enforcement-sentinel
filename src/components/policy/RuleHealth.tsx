@@ -52,11 +52,20 @@ export function RuleHealth({
   coverage,
   onSelectRule,
   compact = false,
+  headless = false,
 }: {
   coverage: CoverageReport;
   /** Optional: jump to a rule. The dashboard has nowhere to jump to. */
   onSelectRule?: (ruleId: string) => void;
   compact?: boolean;
+  /**
+   * Drop the alert frame and the headline, for a caller that already states
+   * the count. The Testing Center's fold is labelled "45 of 64 rules proven";
+   * repeating "45 of 64 rules have been shown to work" directly beneath it,
+   * inside a red box, is the same number twice in two phrasings — which is
+   * most of what made this panel read as an error rather than a report.
+   */
+  headless?: boolean;
 }) {
   if (!coverage.total) return null;
 
@@ -64,6 +73,7 @@ export function RuleHealth({
   const notWorking = coverage.total - coverage.reachable;
 
   if (!notWorking) {
+    if (headless) return null;
     return (
       <Alert tone="success" title="Every rule has been shown working">
         All {coverage.total} rules have a test that makes them fire on data the
@@ -72,16 +82,15 @@ export function RuleHealth({
     );
   }
 
-  return (
-    <Alert
-      tone={broken ? "danger" : "warning"}
-      title={`${coverage.reachable} of ${coverage.total} rules have been shown to work`}
-    >
-      <p className={compact ? "mb-2" : "mb-3"}>
-        {notWorking} have never been shown working, which is not the same as
-        finding nothing wrong &mdash; the two look identical on a results page.{" "}
-        <Summary coverage={coverage} />
-      </p>
+  const body = (
+    <>
+      {!headless && (
+        <p className={compact ? "mb-2" : "mb-3"}>
+          {notWorking} have never been shown working, which is not the same as
+          finding nothing wrong &mdash; the two look identical on a results
+          page. <Summary coverage={coverage} />
+        </p>
+      )}
 
       {!compact && coverage.asks.length > 0 && <AccessAsks coverage={coverage} />}
 
@@ -105,6 +114,17 @@ export function RuleHealth({
       {!compact && coverage.blocked_on.length > 0 && (
         <BlockedFields coverage={coverage} />
       )}
+    </>
+  );
+
+  if (headless) return <div className="text-xs">{body}</div>;
+
+  return (
+    <Alert
+      tone={broken ? "danger" : "warning"}
+      title={`${coverage.reachable} of ${coverage.total} rules have been shown to work`}
+    >
+      {body}
     </Alert>
   );
 }

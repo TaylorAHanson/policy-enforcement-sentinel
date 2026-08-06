@@ -75,7 +75,7 @@ CATEGORIES = {
         "label": "Just needs a test",
         "detail": (
             "Reads data the scanner collects, and nothing looks wrong with it. "
-            "Nobody has written a fixture that makes it fire, so it has never "
+            "Nobody has written a test that makes it fire, so it has never "
             "been shown to work."
         ),
         "action": (
@@ -141,7 +141,7 @@ CATEGORIES = {
     },
     "working": {
         "label": "Shown working",
-        "detail": "A fixture makes it fire on data the scanner can really produce.",
+        "detail": "A test makes it fire on data the scanner can really produce.",
         "action": "",
         "owner": "",
     },

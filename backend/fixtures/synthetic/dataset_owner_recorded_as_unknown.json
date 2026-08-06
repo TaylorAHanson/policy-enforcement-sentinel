@@ -1,5 +1,5 @@
 {
-  "description": "The shape absence actually takes in production. The handlers write the literal \"unknown\" when the API named nobody, so a rule that only checked for a missing key saw a perfectly good owner on every unowned table in the estate. This is the fixture that matters most of the five.",
+  "description": "The shape absence actually takes in production. The handlers write the literal \"unknown\" when the API named nobody, so a rule that only checked for a missing key saw a perfectly good owner on every unowned table in the estate. This is the test that matters most of the five.",
   "workspace": "synthetic-prod",
   "workspace_type": "enterprise",
   "environment": "prod",
