@@ -109,7 +109,7 @@ def get_database_url() -> str:
     pg_port = os.environ.get("PGPORT", "5432")
 
     host = pg_host or settings.DATABASE_HOST
-    user = pg_user or settings.DATABASE_USER or "atlas_app"
+    user = pg_user or settings.DATABASE_USER or "policy_enforcement_sentinel_app"
     name = pg_name or settings.DATABASE_NAME
     port = pg_port or settings.DATABASE_PORT
     password = settings.DATABASE_PASSWORD
