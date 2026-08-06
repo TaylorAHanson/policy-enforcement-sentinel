@@ -73,17 +73,28 @@ applies if {
 	input.resource.type == "cluster"
 }
 
+# The modes that put several people on one cluster with no separation between
+# them. `USER_ISOLATION` is deliberately absent: it is what the UI calls
+# "Standard" (formerly "Shared") and it is the mode this rule wants people to
+# move *to*, since it keeps users apart. The rule previously compared against
+# the literal "shared", which the SDK has never emitted for any cluster.
+unisolated_modes := {"NONE", "LEGACY_PASSTHROUGH", "LEGACY_TABLE_ACL", "LEGACY_SINGLE_USER_STANDARD"}
+
 violations.shared_interactive_in_prod contains msg if {
 	applies
 	input.resource.cluster_type == "interactive"
-	input.resource.access_mode == "shared"
+	upper(object.get(input.resource, "access_mode", "")) in unisolated_modes
 	input.workspace.environment == "prod"
 	msg := "Shared interactive cluster in production. Use single-user or job compute so that activity is attributable."
 }
 
 violations.missing_compute_policy contains msg if {
 	applies
-	not input.resource.policy_id
+
+	# Not `not input.resource.policy_id`. The SDK returns JSON null for a
+	# cluster with no policy, and null is a *defined* value in Rego, so the
+	# negation fails and the rule never fires. See common.is_set.
+	not common.is_set(object.get(input.resource, "policy_id", null))
 	msg := "Cluster was created without a compute policy. Attach one so size and runtime are bounded."
 }
 
@@ -103,6 +114,16 @@ violations.no_autotermination contains msg if {
 	applies
 	input.resource.cluster_type == "interactive"
 	object.get(input.resource, "autotermination_minutes", 0) == 0
+	msg := "Autotermination is disabled. This cluster will run until somebody stops it by hand."
+}
+
+# Written twice on purpose: discovery reports a disabled autotermination as
+# either 0 or null depending on how the cluster was created, and testing only
+# for 0 let every null-valued cluster through.
+violations.no_autotermination contains msg if {
+	applies
+	input.resource.cluster_type == "interactive"
+	object.get(input.resource, "autotermination_minutes", 0) == null
 	msg := "Autotermination is disabled. This cluster will run until somebody stops it by hand."
 }
 

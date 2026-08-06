@@ -73,7 +73,7 @@ is_databricks_provided if {
 violations.missing_cost_center contains msg if {
 	applies
 	not is_databricks_provided
-	not input.resource.attributes.custom_tags.cost_center
+	not common.is_set(object.get(input.resource.tags, "cost_center", null))
 	msg := "No 'cost_center' tag, so inference spend cannot be charged back."
 }
 
@@ -81,7 +81,7 @@ violations.no_scale_to_zero contains msg if {
 	applies
 	not is_databricks_provided
 	input.workspace.environment != "prod"
-	object.get(input.resource.attributes, "scale_to_zero_enabled", true) == false
+	object.get(input.resource, "scale_to_zero", true) == false
 	msg := "Scale-to-zero is disabled outside production, so this endpoint bills continuously."
 }
 
@@ -95,7 +95,7 @@ violations.no_inference_logging contains msg if {
 	applies
 	not is_databricks_provided
 	input.workspace.environment == "prod"
-	object.get(input.resource.attributes, "inference_logging_enabled", false) == false
+	object.get(input.resource, "inference_logging", false) == false
 	msg := "Inference logging is disabled on a production endpoint."
 }
 

@@ -83,7 +83,7 @@ violations.missing_classification contains msg if {
 
 violations.no_owner contains msg if {
 	applies
-	not object.get(input.resource, "owner", false)
+	common.no_owner(input.resource)
 	msg := "No owner recorded for this volume."
 }
 

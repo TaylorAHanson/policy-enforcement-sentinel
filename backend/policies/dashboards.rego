@@ -66,7 +66,7 @@ violations.embedded_credentials_shared_broadly contains msg if {
 violations.published_without_owner contains msg if {
 	applies
 	object.get(input.resource, "is_published", false) == true
-	not object.get(input.resource, "owner", false)
+	common.no_owner(input.resource)
 	msg := "Published dashboard has no owner recorded."
 }
 

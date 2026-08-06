@@ -75,7 +75,7 @@ violations.oversized_capacity contains msg if {
 violations.short_retention contains msg if {
 	applies
 	input.workspace.environment == "prod"
-	retention := object.get(input.resource, "retention_days", 0)
+	retention := object.get(input.resource, "retention_window_days", 0)
 	retention < 7
 	msg := sprintf("Point-in-time recovery retention is %v days; production requires at least 7.", [retention])
 }
@@ -89,7 +89,7 @@ violations.idle contains msg if {
 
 violations.no_owner contains msg if {
 	applies
-	not object.get(input.resource, "owner", false)
+	common.no_owner(input.resource)
 	msg := "No owner recorded for this Lakebase instance."
 }
 

@@ -71,7 +71,7 @@ applies if {
 
 violations.not_serverless contains msg if {
 	applies
-	object.get(input.resource.attributes, "serverless", true) == false
+	object.get(input.resource, "serverless", true) == false
 	msg := "Pipeline uses classic compute rather than serverless."
 }
 
@@ -84,7 +84,7 @@ violations.no_expectations contains msg if {
 
 violations.hive_metastore_target contains msg if {
 	applies
-	object.get(input.resource.attributes, "target_catalog", "") == "hive_metastore"
+	object.get(input.resource, "target_catalog", "") == "hive_metastore"
 	msg := "Pipeline publishes to hive_metastore, which has no Unity Catalog governance or lineage."
 }
 
@@ -98,7 +98,7 @@ violations.human_owner_in_prod contains msg if {
 violations.continuous_in_dev contains msg if {
 	applies
 	input.workspace.environment != "prod"
-	object.get(input.resource.attributes, "continuous", false) == true
+	object.get(input.resource, "continuous", false) == true
 	msg := "Continuous mode outside production keeps compute running indefinitely."
 }
 

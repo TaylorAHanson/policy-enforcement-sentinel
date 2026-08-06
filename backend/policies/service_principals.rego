@@ -70,6 +70,16 @@ violations.dormant contains msg if {
 	msg := sprintf("No successful authentication or workload activity in %v days.", [idle])
 }
 
+# Written twice because SCIM files this in one of two places depending on how
+# the client was configured, not on anything about the principal: an
+# account-scoped client returns it under `roles`, a workspace-scoped one under
+# `entitlements`. Checking only one leaves the rule silent half the time.
+violations.account_admin contains msg if {
+	applies
+	"account_admin" in object.get(input.resource, "roles", [])
+	msg := "Holds the account admin role."
+}
+
 violations.account_admin contains msg if {
 	applies
 	"account_admin" in object.get(input.resource, "entitlements", [])
@@ -78,7 +88,7 @@ violations.account_admin contains msg if {
 
 violations.no_owner_tag contains msg if {
 	applies
-	not object.get(input.resource, "owner", false)
+	common.no_owner(input.resource)
 	msg := "No owner recorded for this service principal."
 }
 
