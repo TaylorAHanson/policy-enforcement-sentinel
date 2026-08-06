@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
-import GithubSlugger from "github-slugger";
 import ReactMarkdown from "react-markdown";
 import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
@@ -15,52 +14,8 @@ import { markReleasesSeen } from "../lib/releaseSeen";
 /** Where the sticky nav sits, and how far above a target we stop scrolling. */
 const SCROLL_OFFSET = 96;
 
-interface Section {
-  id: string;
-  text: string;
-}
-
-interface Outline {
-  version: string;
-  title: string;
-  /** The card's DOM id, and the anchor key the nav highlights. */
-  anchor: string;
-  sections: Section[];
-}
-
-/**
- * The `##` headings of one release body, slugged the way rehype-slug will slug
- * them when the same markdown is rendered.
- *
- * Both sides run github-slugger over the headings in document order, so the
- * duplicate counters agree and the nav's ids match the rendered ones.
- */
-function sectionsOf(body: string): Section[] {
-  const slugger = new GithubSlugger();
-  const sections: Section[] = [];
-  let inCodeBlock = false;
-
-  for (const line of body.split("\n")) {
-    if (line.trim().startsWith("```")) {
-      inCodeBlock = !inCodeBlock;
-      continue;
-    }
-    if (inCodeBlock) continue;
-
-    const match = line.match(/^##\s+(.+)$/);
-    if (!match) continue;
-
-    // Match the rendered text, since that is what rehype-slug sees.
-    const text = match[1]
-      .trim()
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-      .replace(/[`*_~]/g, "");
-
-    sections.push({ id: slugger.slug(text), text });
-  }
-
-  return sections;
-}
+/** The card's DOM id, and the key the nav highlights. */
+const anchorFor = (version: string) => `release-${version}`;
 
 /**
  * What changed, newest first.
@@ -70,9 +25,10 @@ function sectionsOf(body: string): Section[] {
  * not looked at this yet", which is the only thing it could usefully mean.
  *
  * The releases stay in one continuous column rather than being shown one at a
- * time, because release notes are read through. The nav exists so that reading
- * deep into one release does not strand you: it is a map of where you are, not
- * a filter.
+ * time, because release notes are read through. The nav lists versions and
+ * nothing else: it also listed every `##` heading, which for a release with
+ * twenty sections filled the column with a wall of small grey text and made the
+ * versions — the only thing anyone navigates by — impossible to pick out.
  */
 export default function ReleaseNotes() {
   const [releases, setReleases] = useState<Release[]>([]);
@@ -100,21 +56,10 @@ export default function ReleaseNotes() {
     void load();
   }, []);
 
-  const outlines = useMemo<Outline[]>(
-    () =>
-      releases.map((release) => ({
-        version: release.version,
-        title: release.title,
-        anchor: `release-${release.version}`,
-        sections: sectionsOf(release.body),
-      })),
-    [releases],
-  );
-
-  // Which anchor the reader is currently under. Derived from position on every
+  // Which release the reader is currently under. Derived from position on every
   // scroll rather than from clicks, so it stays right when they scroll by hand.
   useEffect(() => {
-    if (!outlines.length) return;
+    if (!releases.length) return;
 
     const scroller = document.querySelector("main");
     if (!scroller) return;
@@ -175,29 +120,20 @@ export default function ReleaseNotes() {
       window.removeEventListener("keydown", release);
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [outlines]);
+  }, [releases]);
 
-  const scrollTo = useCallback((anchor: string, sectionId?: string) => {
+  const scrollTo = useCallback((anchor: string) => {
     const card = document.getElementById(anchor);
     if (!card) return;
 
-    let target: HTMLElement = card;
-    if (sectionId) {
-      const heading = Array.from(card.querySelectorAll<HTMLElement>("h2[id]")).find(
-        (node) => node.id === sectionId,
-      );
-      if (heading) target = heading;
-    }
-
-    // Held until the reader scrolls for themselves. The last sections sit too
+    // Held until the reader scrolls for themselves. The last release sits too
     // close to the end of the document to ever reach the top of the viewport,
-    // so position alone would highlight the wrong entry for them however much
+    // so position alone would highlight the wrong entry for it however much
     // trailing space the page has.
-    const key = sectionId ? `${anchor}::${sectionId}` : anchor;
-    pinned.current = key;
-    setActive(key);
+    pinned.current = anchor;
+    setActive(anchor);
 
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    card.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
   if (loading && !releases.length) {
@@ -235,23 +171,23 @@ export default function ReleaseNotes() {
           description="Add a Markdown file to docs/release-notes/ and it will appear here."
         />
       ) : (
-        <div className="flex items-start gap-8">
+        <div className="flex items-start gap-6">
           <ReleaseNav
-            outlines={outlines}
+            releases={releases}
             active={active}
             onNavigate={scrollTo}
           />
 
-          {/* Enough trailing space that the late sections land somewhere
+          {/* Enough trailing space that the oldest release lands somewhere
               readable when jumped to, but not so much that the end of the page
-              looks like a rendering failure. The last one still cannot reach
-              the top, which is why the scroll-spy has a bottom case. */}
+              looks like a rendering failure. It still cannot reach the top,
+              which is why the scroll-spy has a bottom case. */}
           <div className="min-w-0 flex-1 space-y-6 pb-[40vh]">
             {releases.map((release, index) => (
               <Card
                 key={release.version}
-                id={`release-${release.version}`}
-                data-anchor={`release-${release.version}`}
+                id={anchorFor(release.version)}
+                data-anchor={anchorFor(release.version)}
                 className="scroll-mt-6"
               >
                 <CardHeader className="gap-2">
@@ -275,21 +211,12 @@ export default function ReleaseNotes() {
                 </CardHeader>
                 <CardContent>
                   <div className="prose-sentinel text-xs">
+                    {/* rehype-slug still gives every heading an id, so a link
+                        to one from elsewhere keeps working even though the nav
+                        no longer lists them. */}
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       rehypePlugins={[rehypeSlug]}
-                      components={{
-                        // `node` is pulled out so react-markdown's AST node is
-                        // not spread onto the DOM element. The id comes from
-                        // rehype-slug; data-anchor is what the nav tracks.
-                        h2: ({ node: _node, ...props }) => (
-                          <h2
-                            {...props}
-                            data-anchor={`release-${release.version}::${props.id ?? ""}`}
-                            className="scroll-mt-6"
-                          />
-                        ),
-                      }}
                     >
                       {release.body}
                     </ReactMarkdown>
@@ -304,71 +231,38 @@ export default function ReleaseNotes() {
   );
 }
 
+/** Version numbers, and nothing else. The list is short enough to read at a glance. */
 function ReleaseNav({
-  outlines,
+  releases,
   active,
   onNavigate,
 }: {
-  outlines: Outline[];
+  releases: Release[];
   active: string | null;
-  onNavigate: (anchor: string, sectionId?: string) => void;
+  onNavigate: (anchor: string) => void;
 }) {
   return (
     <nav
       aria-label="Releases"
-      className="sticky top-0 hidden max-h-[calc(100vh-8rem)] w-52 shrink-0 overflow-y-auto lg:block"
+      className="sticky top-0 hidden max-h-[calc(100vh-8rem)] w-20 shrink-0 overflow-y-auto lg:block"
     >
-      <p className="mb-2 text-2xs font-medium tracking-wide text-content-subtle uppercase">
-        Releases
-      </p>
-
-      <ul className="space-y-3 border-l border-border">
-        {outlines.map((outline) => {
-          const onRelease =
-            active === outline.anchor || active?.startsWith(`${outline.anchor}::`);
-
+      <ul className="border-l border-border">
+        {releases.map((release) => {
+          const anchor = anchorFor(release.version);
           return (
-            <li key={outline.version}>
+            <li key={release.version}>
               <button
                 type="button"
-                onClick={() => onNavigate(outline.anchor)}
+                onClick={() => onNavigate(anchor)}
                 className={cn(
-                  "-ml-px block w-full border-l-2 py-0.5 pl-3 text-left text-xs transition-colors",
-                  onRelease
+                  "-ml-px block w-full border-l-2 py-1 pl-3 text-left font-mono text-xs transition-colors",
+                  active === anchor
                     ? "border-l-accent font-medium text-content"
                     : "border-l-transparent text-content-muted hover:text-content",
                 )}
               >
-                <span className="font-mono">v{outline.version}</span>
-                <span className="mt-0.5 block truncate text-2xs text-content-subtle">
-                  {outline.title}
-                </span>
+                v{release.version}
               </button>
-
-              {outline.sections.length > 0 && (
-                <ul className="mt-1 space-y-0.5">
-                  {outline.sections.map((section) => {
-                    const anchor = `${outline.anchor}::${section.id}`;
-                    return (
-                      <li key={section.id}>
-                        <button
-                          type="button"
-                          onClick={() => onNavigate(outline.anchor, section.id)}
-                          title={section.text}
-                          className={cn(
-                            "-ml-px block w-full truncate border-l-2 py-0.5 pl-5 text-left text-2xs transition-colors",
-                            active === anchor
-                              ? "border-l-accent text-content"
-                              : "border-l-transparent text-content-subtle hover:text-content-muted",
-                          )}
-                        >
-                          {section.text}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
             </li>
           );
         })}
