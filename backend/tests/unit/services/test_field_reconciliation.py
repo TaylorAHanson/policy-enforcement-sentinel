@@ -219,6 +219,39 @@ def test_an_unbounded_field_yields_no_verdict():
     assert not [f for f in report["findings"] if f["kind"] == "impossible_comparison"]
 
 
+def test_the_shipped_policies_are_read_by_resource_type():
+    """The cross-check needs real policy text, and the registry is the only
+    thing that knows which file governs which type."""
+    sources = fr.policy_sources()
+    assert "clusters.rego" in sources.get("cluster", {})
+    assert "package" in sources["cluster"]["clusters.rego"]
+
+
+def test_only_the_one_known_impossible_comparison_remains():
+    """SEC-VOL-001 looks for data in DBFS among objects the Unity Catalog
+    volumes API returns, and everything it returns is in Unity Catalog by
+    definition — so `storage_type` is MANAGED or EXTERNAL and never `dbfs`. It
+    cannot be fixed by editing the comparison; it needs a decision about what
+    the rule is for. Until then it is pinned here, so that a *new* impossible
+    comparison fails this test instead of hiding behind a known one."""
+    import glob
+    import json
+
+    resources = [
+        json.load(open(path))["resource"]
+        for path in glob.glob("fixtures/synthetic/*.json")
+    ]
+    report = fr.reconcile(fr.observe(resources), policy_sources=fr.policy_sources())
+    impossible = {
+        (f["resource_type"], f["field"])
+        for f in report["findings"]
+        if f["kind"] == "impossible_comparison"
+    }
+    assert impossible == {("storage", "storage_type")}, "\n".join(
+        f["detail"] for f in report["findings"] if f["kind"] == "impossible_comparison"
+    )
+
+
 def test_an_identifying_field_is_never_judged_on_its_values():
     """`owner` has no recorded values by design, so a comparison against it
     cannot be called impossible however it is written."""

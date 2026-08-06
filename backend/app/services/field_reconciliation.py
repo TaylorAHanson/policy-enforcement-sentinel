@@ -402,4 +402,80 @@ def _count_kinds(findings: List[Dict[str, Any]]) -> Dict[str, int]:
     return counts
 
 
-__all__ = ["compared_literals", "observe", "reconcile"]
+def policy_sources() -> Dict[str, Dict[str, str]]:
+    """``{resource_type: {policy name: rego source}}`` for the shipped policies."""
+    # Imported here rather than at module scope: policy_registry shells out to
+    # `opa` on first use, and this module is imported by the scan path, which
+    # should not pay for that unless somebody asks for a reconciliation.
+    from app.services import policy_registry
+
+    sources: Dict[str, Dict[str, str]] = {}
+    for policy in policy_registry.load_policies():
+        if not policy.resource_type:
+            continue
+        try:
+            with open(policy.file, "r", encoding="utf-8") as handle:
+                sources.setdefault(policy.resource_type, {})[policy.name] = handle.read()
+        except OSError as e:
+            logger.warning("Could not read %s for reconciliation: %s", policy.file, e)
+    return sources
+
+
+def latest_observations(db) -> Optional[Dict[str, Any]]:
+    """Field observations from the most recent scan that recorded any.
+
+    ``None`` when no scan has run, which is the honest answer and a different
+    thing from a scan that found no drift. The caller says which.
+    """
+    from app.db.sentinel_run import SentinelRunModel
+
+    runs = (
+        db.query(SentinelRunModel)
+        .order_by(SentinelRunModel.id.desc())
+        .limit(25)
+        .all()
+    )
+    for run in runs:
+        observations = (run.results or {}).get("field_observations")
+        if observations and observations.get("resource_types"):
+            return {
+                "run_id": run.run_id,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "observations": observations,
+            }
+    return None
+
+
+def report(db) -> Dict[str, Any]:
+    """The drift report for the latest scan, or an explanation of its absence."""
+    latest = latest_observations(db)
+    if not latest:
+        return {
+            "available": False,
+            "reason": (
+                "No scan has recorded what the handlers emit yet. Run a scan "
+                "against a real workspace and this will compare the field "
+                "catalogue against what actually came back."
+            ),
+            "resource_types": [],
+            "findings": [],
+            "inert": [],
+            "counts": _count_kinds([]),
+            "total": 0,
+        }
+
+    result = reconcile(latest["observations"], policy_sources=policy_sources())
+    result["available"] = True
+    result["run_id"] = latest["run_id"]
+    result["observed_at"] = latest["started_at"]
+    return result
+
+
+__all__ = [
+    "compared_literals",
+    "latest_observations",
+    "observe",
+    "policy_sources",
+    "reconcile",
+    "report",
+]

@@ -570,6 +570,53 @@ export interface CoverageReport {
 }
 
 /**
+ * A disagreement between the field catalogue and a real estate.
+ *
+ * Everything else here is checked *against* `discovered_fields`. This is the
+ * only check of `discovered_fields` itself, so it is the only one that can
+ * catch a rule the coverage report is calling healthy.
+ */
+export interface DriftFinding {
+  kind: "never_emitted" | "undeclared" | "impossible_comparison" | "inert";
+  resource_type: string;
+  field: string;
+  resource_count: number;
+  detail: string;
+  /** Present on impossible_comparison only. */
+  policy?: string;
+  compared_against?: string[];
+  observed_values?: string[];
+}
+
+export interface DriftResourceType {
+  resource_type: string;
+  resource_count: number;
+  scanned: boolean;
+  /** False when too few resources were seen to conclude anything. */
+  conclusive: boolean;
+  never_emitted: string[];
+  undeclared: string[];
+  impossible_comparisons: DriftFinding[];
+  inert: string[];
+  unregistered?: boolean;
+}
+
+export interface DriftReport {
+  /** False until a scan has recorded what the handlers emit. */
+  available: boolean;
+  reason?: string;
+  run_id?: string;
+  observed_at?: string | null;
+  resource_types: DriftResourceType[];
+  /** The catalogue and the estate disagree; one of them is wrong. */
+  findings: DriftFinding[];
+  /** They agree, and no rule reading these fields can fire today. */
+  inert: DriftFinding[];
+  counts: Record<string, number>;
+  total: number;
+}
+
+/**
  * A field a policy reads that discovery never collects.
  *
  * Not a compile error — that is the problem. The rule is valid Rego that can
@@ -1094,6 +1141,14 @@ export const api = {
     /** Which rules any fixture exercises, and which nothing covers. */
     coverage: (params?: { resource_type?: string; policy?: string }) =>
       get<CoverageReport>("/testing/coverage", params),
+
+    /**
+     * Where the field catalogue disagrees with the last real scan.
+     *
+     * Needs a scan to have happened. Against fixtures it would only confirm
+     * that fixtures match the catalogue, which is true by construction.
+     */
+    drift: () => get<DriftReport>("/testing/drift"),
 
     /** Writes fixtures from the resources a real scan already recorded. */
     capture: (body?: {

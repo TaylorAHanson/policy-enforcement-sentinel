@@ -27,9 +27,11 @@ import {
   Tabs,
 } from "../components/ui";
 import { RuleHealth } from "../components/policy/RuleHealth";
+import { CatalogueDrift } from "../components/policy/CatalogueDrift";
 import api, {
   type CaptureResult,
   type CoverageReport,
+  type DriftReport,
   type PytestRun,
   type SyntheticFixture,
   type SyntheticResult,
@@ -89,18 +91,21 @@ function FixturePanel() {
   const [capturing, setCapturing] = useState(false);
   const [captured, setCaptured] = useState<CaptureResult | null>(null);
   const [coverage, setCoverage] = useState<CoverageReport | null>(null);
+  const [drift, setDrift] = useState<DriftReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [data, cover] = await Promise.all([
+      const [data, cover, catalogue] = await Promise.all([
         api.testing.fixtures(),
         api.testing.coverage(),
+        api.testing.drift(),
       ]);
       setFixtures(data.fixtures);
       setCoverage(cover);
+      setDrift(catalogue);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -189,6 +194,12 @@ function FixturePanel() {
       )}
 
       {coverage && <RuleHealth coverage={coverage} />}
+
+      {/* Below rule health because it is the check on that check. Rule health
+          reads the field catalogue to decide a rule is working; this is the only
+          thing that can say the catalogue was wrong, which would make the panel
+          above confidently incorrect rather than merely incomplete. */}
+      {drift && <CatalogueDrift drift={drift} />}
 
       {error && <ErrorState message={error} onRetry={() => void load()} />}
 

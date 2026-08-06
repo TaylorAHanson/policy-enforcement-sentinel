@@ -48,6 +48,7 @@ from app.db.sentinel_finding import SentinelFindingModel
 from app.providers.databricks.client import DatabricksProvider
 from app.providers.databricks.handlers import HANDLER_REGISTRY, supported_methods
 from app.providers.opa.client import OpaProvider
+from app.services import field_reconciliation
 from app.services.action_executor import execute_action
 
 logger = logging.getLogger(__name__)
@@ -435,6 +436,13 @@ class SentinelService:
         logger.info(
             "Discovered %d resource(s) in %s; evaluating.", len(resources), workspace_name
         )
+
+        # What the handlers actually emitted, before any rule reads it. This is
+        # the only point in the system that sees real resources rather than the
+        # catalogue's description of them, and it is what lets
+        # `field_reconciliation` tell a rule that found nothing from a rule that
+        # could never find anything. Counts only — no resource survives into it.
+        summary["field_observations"] = field_reconciliation.observe(resources)
 
         workspace_type = "enterprise" if "enterprise" in workspace_name else "domain"
         evaluation_results = await _gather_bounded(

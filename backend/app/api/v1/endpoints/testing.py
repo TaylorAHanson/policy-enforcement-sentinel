@@ -19,7 +19,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.services import pytest_runner, rule_diagnosis, synthetic_estate
+from app.services import (
+    field_reconciliation,
+    pytest_runner,
+    rule_diagnosis,
+    synthetic_estate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +133,27 @@ def coverage(resource_type: Optional[str] = None, policy: Optional[str] = None):
         )
     except Exception as e:
         logger.exception("Coverage lookup failed.")
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/drift")
+def drift(db: Session = Depends(get_db)):
+    """Where the field catalogue and the real estate disagree.
+
+    Every other check here is made *against* ``discovered_fields``: policies are
+    validated against it, fixtures may not invent a field outside it, and the
+    coverage diagnosis decides a rule is workable by consulting it. It is a
+    hand-written docstring on a Python class and nothing has ever confirmed it.
+
+    This compares it to what the handlers emitted on the last real scan. It
+    needs a scan to have happened — against fixtures it would only confirm that
+    fixtures were written to match the catalogue, which is true by construction
+    and proves nothing.
+    """
+    try:
+        return field_reconciliation.report(db)
+    except Exception as e:
+        logger.exception("Drift report failed.")
         raise HTTPException(status_code=502, detail=str(e))
 
 
