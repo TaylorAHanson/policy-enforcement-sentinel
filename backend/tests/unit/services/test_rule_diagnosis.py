@@ -210,6 +210,52 @@ def test_blocked_fields_are_ordered_by_how_much_they_unblock(report):
     assert counts == sorted(counts, reverse=True)
 
 
+def test_permission_blocked_rules_are_grouped_into_the_grants_that_release_them(report):
+    """Ten blocked rules are not ten problems. Told per rule, the panel repeats
+    "needs SELECT on the system catalog" six times and never adds up to the ask;
+    grouped, it is a short list somebody can take to a metastore admin."""
+    asks = report["asks"]
+    assert asks, "permission-blocked rules should collapse into named grants"
+
+    # Fewer asks than rules, or the grouping has bought nothing.
+    blocked = report["by_category"]["needs_permission"]
+    assert len(asks) < blocked
+
+    # Every blocked rule is accounted for by exactly one ask.
+    grouped = {rule_id for ask in asks for rule_id in ask["rules"]}
+    expected = {
+        rule["rule_id"] for rule in report["rules"] if rule["category"] == "needs_permission"
+    }
+    assert grouped == expected
+    assert sum(ask["rule_count"] for ask in asks) == blocked
+
+
+def test_the_grants_lead_with_the_one_that_buys_the_most(report):
+    counts = [ask["rule_count"] for ask in report["asks"]]
+    assert counts == sorted(counts, reverse=True)
+
+
+def test_every_grant_names_what_it_is_for(report):
+    """A requirement with no field behind it is an errand with no reason."""
+    for ask in report["asks"]:
+        assert ask["requirement"]
+        assert ask["detail"]
+        assert ask["fields"]
+
+
+def test_the_unscanned_resource_types_are_named(report):
+    """"Nothing scans this" leaves the reader to go and find out what. Naming it
+    is one word and turns a mystery into a task."""
+    unscanned = report["unscanned_types"]
+    no_handler = {
+        rule["resource_type"]
+        for rule in report["rules"]
+        if rule["category"] == "no_handler"
+    }
+    assert set(unscanned) == no_handler
+    assert bool(unscanned) == bool(report["by_category"]["no_handler"])
+
+
 def test_a_not_exposed_rule_names_no_requirement(report):
     """There is no access to ask for, so offering one would send somebody on a
     pointless errand. The detail still has to explain why."""

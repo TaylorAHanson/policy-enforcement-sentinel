@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Lock, Wrench } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -38,15 +38,15 @@ const TONE: Record<RuleCategory, string> = {
   working: "text-success",
 };
 
-/**
- * Categories where the next move is not writing code.
- *
- * Worth separating visually: the first three groups are a queue of work, and
- * these two are not. Showing them in the same tone as a fixable bug is how a
- * rule that needs a metastore admin's signature sits in an engineering backlog
- * for a year.
- */
-const NOT_OUR_MOVE: RuleCategory[] = ["needs_permission", "not_exposed"];
+/** "a, b and c" — the counts read as prose, so they should punctuate like it. */
+function sentence(parts: ReactNode[]): ReactNode {
+  return parts.map((part, index) => (
+    <span key={index}>
+      {index > 0 && (index === parts.length - 1 ? " and " : ", ")}
+      {part}
+    </span>
+  ));
+}
 
 export function RuleHealth({
   coverage,
@@ -62,10 +62,6 @@ export function RuleHealth({
 
   const broken = coverage.by_category.suspect ?? 0;
   const notWorking = coverage.total - coverage.reachable;
-  const blocked = NOT_OUR_MOVE.reduce(
-    (sum, category) => sum + (coverage.by_category[category] ?? 0),
-    0,
-  );
 
   if (!notWorking) {
     return (
@@ -82,18 +78,12 @@ export function RuleHealth({
       title={`${coverage.reachable} of ${coverage.total} rules have been shown to work`}
     >
       <p className={compact ? "mb-2" : "mb-3"}>
-        A rule that has never been shown working is not the same as a rule that
-        found nothing wrong, but they look identical on a results page. These{" "}
-        {notWorking} are not all the same problem, and they do not all have the
-        same fix.
-        {blocked > 0 && (
-          <>
-            {" "}
-            {blocked} of them are waiting on somebody&rsquo;s permission, or on a
-            decision to retire the rule, rather than on any code.
-          </>
-        )}
+        {notWorking} have never been shown working, which is not the same as
+        finding nothing wrong &mdash; the two look identical on a results page.{" "}
+        <Summary coverage={coverage} />
       </p>
+
+      {!compact && coverage.asks.length > 0 && <AccessAsks coverage={coverage} />}
 
       <div className="space-y-1.5">
         {ORDER.map((category) => {
@@ -106,6 +96,7 @@ export function RuleHealth({
               count={count}
               coverage={coverage}
               onSelectRule={onSelectRule}
+              showRequirement={compact || !coverage.asks.length}
             />
           );
         })}
@@ -118,16 +109,132 @@ export function RuleHealth({
   );
 }
 
+/**
+ * One clause per group, with numbers that add up to the ones below.
+ *
+ * The paragraph this replaced said "14 of them are waiting on somebody's
+ * permission, or on a decision to retire the rule" — a number that matched no
+ * group the reader could then see, describing two situations at once.
+ */
+function Summary({ coverage }: { coverage: CoverageReport }) {
+  const count = (category: RuleCategory) => coverage.by_category[category] ?? 0;
+  const clauses: ReactNode[] = [];
+
+  const suspect = count("suspect");
+  if (suspect) {
+    clauses.push(
+      suspect === 1 ? "one looks like a bug" : `${suspect} look like bugs`,
+    );
+  }
+
+  const untested = count("untested");
+  if (untested) {
+    clauses.push(`${untested} ${untested === 1 ? "needs" : "need"} a test`);
+  }
+
+  const discovery = count("needs_discovery");
+  if (discovery) {
+    clauses.push(
+      `${discovery} ${discovery === 1 ? "waits" : "wait"} on a field nothing collects yet`,
+    );
+  }
+
+  const permission = count("needs_permission");
+  if (permission && coverage.asks.length) {
+    clauses.push(
+      `${permission} ${permission === 1 ? "waits" : "wait"} on ${coverage.asks.length} access ${coverage.asks.length === 1 ? "grant" : "grants"}`,
+    );
+  }
+
+  const noHandler = count("no_handler");
+  if (noHandler) {
+    const types = coverage.unscanned_types;
+    clauses.push(
+      <>
+        {noHandler} {noHandler === 1 ? "needs" : "need"}{" "}
+        {types.length === 1 ? "a" : ""}{" "}
+        {sentence(
+          types.map((type) => (
+            <code key={type} className="font-mono">
+              {type}
+            </code>
+          )),
+        )}{" "}
+        {types.length === 1 ? "handler" : "handlers"}
+      </>,
+    );
+  }
+
+  const notExposed = count("not_exposed");
+  if (notExposed) {
+    clauses.push(
+      `${notExposed} ${notExposed === 1 ? "asks" : "ask"} for something Databricks does not publish`,
+    );
+  }
+
+  if (!clauses.length) return null;
+  return <>Of those, {sentence(clauses)}.</>;
+}
+
+/**
+ * The permission-blocked rules folded into the grants that would release them.
+ *
+ * Ten rules each carrying "needs SELECT on the system catalog" is ten lines
+ * saying one thing. Grouped, it is a short list of requests with a number
+ * attached to each — which is the form in which somebody can take it to whoever
+ * owns the metastore and get a yes or a no.
+ */
+function AccessAsks({ coverage }: { coverage: CoverageReport }) {
+  const total = coverage.asks.reduce((sum, ask) => sum + ask.rule_count, 0);
+
+  return (
+    <div className="mb-3 rounded-md border border-border bg-surface-raised/50 px-2.5 py-2">
+      <p className="mb-1.5 flex items-center gap-1.5 text-2xs font-semibold text-content">
+        <Lock className="size-3 shrink-0" />
+        {coverage.asks.length} {coverage.asks.length === 1 ? "grant" : "grants"}{" "}
+        would turn on {total} {total === 1 ? "rule" : "rules"}
+      </p>
+      <ul className="space-y-1">
+        {coverage.asks.map((ask) => (
+          <li
+            key={ask.requirement}
+            className="flex items-baseline gap-2 text-2xs"
+          >
+            <Badge variant="outline">{ask.rule_count}</Badge>
+            <span>
+              <span className="font-medium text-content">{ask.requirement}</span>
+              <span className="text-content-muted">
+                {" "}
+                &mdash; for{" "}
+                {sentence(
+                  ask.fields.map((field) => (
+                    <code key={field} className="font-mono">
+                      {field}
+                    </code>
+                  )),
+                )}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function CategoryRow({
   category,
   count,
   coverage,
   onSelectRule,
+  showRequirement,
 }: {
   category: RuleCategory;
   count: number;
   coverage: CoverageReport;
   onSelectRule?: (ruleId: string) => void;
+  /** False when the grants panel above already names it, to stop it repeating. */
+  showRequirement: boolean;
 }) {
   const [open, setOpen] = useState(category === "suspect");
   const info = coverage.categories[category];
@@ -151,6 +258,20 @@ function CategoryRow({
           </span>
           <p className="mt-0.5 text-2xs leading-relaxed text-content-muted">
             {info.detail}
+            {category === "no_handler" && coverage.unscanned_types.length > 0 && (
+              <>
+                {" "}
+                Nothing discovers{" "}
+                {sentence(
+                  coverage.unscanned_types.map((type) => (
+                    <code key={type} className="font-mono text-content">
+                      {type}
+                    </code>
+                  )),
+                )}
+                .
+              </>
+            )}
           </p>
         </div>
       </button>
@@ -204,11 +325,16 @@ function CategoryRow({
                     >
                       <Lock className="mt-0.5 size-3 shrink-0" />
                       <span>
-                        Needs{" "}
-                        <span className="font-semibold text-content">
-                          {blocker.requirement}
-                        </span>
-                        . {blocker.detail}
+                        {showRequirement && (
+                          <>
+                            Needs{" "}
+                            <span className="font-semibold text-content">
+                              {blocker.requirement}
+                            </span>
+                            .{" "}
+                          </>
+                        )}
+                        {blocker.detail}
                       </span>
                     </p>
                   ))}

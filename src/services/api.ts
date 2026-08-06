@@ -567,6 +567,28 @@ export interface CoverageReport {
   categories: Record<RuleCategory, CategoryInfo>;
   /** Ordered by how many rules each field would unblock. */
   blocked_on: BlockedField[];
+  /** Permission-blocked rules folded into the grants that would release them. */
+  asks: AccessAsk[];
+  /** Resource types a rule governs and no handler discovers. */
+  unscanned_types: string[];
+}
+
+/**
+ * One thing to ask an administrator for, and what it turns on.
+ *
+ * Ten blocked rules are not ten problems. Grouped by the grant they wait on
+ * they are three requests, and a request is something a person can act on —
+ * "one grant starts six rules" is a decision, "ten rules are blocked" is a
+ * status.
+ */
+export interface AccessAsk {
+  /** What has to be granted, e.g. "SELECT on the system catalog". */
+  requirement: string;
+  detail: string;
+  rules: string[];
+  rule_count: number;
+  fields: string[];
+  resource_types: string[];
 }
 
 /**

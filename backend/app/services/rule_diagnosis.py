@@ -390,11 +390,65 @@ def diagnose(
             entry["rules"].append(finding["rule_id"])  # type: ignore[union-attr]
             entry["resource_types"].add(finding["resource_type"])  # type: ignore[union-attr]
 
+    # The permission-blocked rules, grouped by what somebody would have to
+    # grant. Ten blocked rules are not ten problems — they are three requests,
+    # and a request is a thing you can take to an administrator. Listing them
+    # per rule instead repeats "needs SELECT on the system catalog" six times
+    # and never adds up to the ask.
+    asks: Dict[str, Dict[str, object]] = {}
+    for finding in findings:
+        if finding["category"] != "needs_permission":
+            continue
+        for blocker in finding["blockers"]:  # type: ignore[union-attr]
+            requirement = str(blocker["requirement"])
+            if not requirement:
+                continue
+            entry = asks.setdefault(
+                requirement,
+                {
+                    "requirement": requirement,
+                    "detail": blocker["detail"],
+                    "rules": set(),
+                    "fields": set(),
+                    "resource_types": set(),
+                },
+            )
+            entry["rules"].add(finding["rule_id"])  # type: ignore[union-attr]
+            entry["fields"].add(blocker["field"])  # type: ignore[union-attr]
+            if finding["resource_type"]:
+                entry["resource_types"].add(finding["resource_type"])  # type: ignore[union-attr]
+
+    # Named so the panel can say "four rules govern `workspace`" rather than
+    # "four rules govern something nothing scans", which leaves the reader to
+    # go and find out what.
+    unscanned_types = sorted(
+        {
+            str(finding["resource_type"])
+            for finding in findings
+            if finding["category"] == "no_handler" and finding["resource_type"]
+        }
+    )
+
     return {
         **coverage,
         "rules": findings,
         "by_category": by_category,
         "categories": CATEGORIES,
+        "unscanned_types": unscanned_types,
+        "asks": sorted(
+            (
+                {
+                    "requirement": entry["requirement"],
+                    "detail": entry["detail"],
+                    "rules": sorted(entry["rules"]),  # type: ignore[arg-type]
+                    "rule_count": len(entry["rules"]),  # type: ignore[arg-type]
+                    "fields": sorted(entry["fields"]),  # type: ignore[arg-type]
+                    "resource_types": sorted(entry["resource_types"]),  # type: ignore[arg-type]
+                }
+                for entry in asks.values()
+            ),
+            key=lambda e: (-e["rule_count"], e["requirement"]),
+        ),
         "blocked_on": sorted(
             (
                 {
