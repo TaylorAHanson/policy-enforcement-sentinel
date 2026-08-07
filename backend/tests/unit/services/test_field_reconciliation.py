@@ -262,3 +262,107 @@ def test_an_identifying_field_is_never_judged_on_its_values():
         fr.observe([cluster() for _ in range(5)]), policy_sources=sources
     )
     assert not [f for f in report["findings"] if f["kind"] == "impossible_comparison"]
+
+
+# --- Reading it back off a run ----------------------------------------------
+#
+# Both bugs this section exists for were in the seam rather than in the logic
+# above: `observe` and `reconcile` were covered by twenty-one tests and were
+# correct, while nothing exercised the path from a stored run to a report. The
+# scan wrote observations per workspace, the reader looked for them at the top
+# level and found nothing, and the panel said "no scan has recorded this yet"
+# through two real scans. One line further on, `run.run_id` referred to a column
+# that does not exist — never raised, because the loop never got that far.
+#
+# A check that fails in the reassuring direction is worse than no check.
+
+
+class FakeRun:
+    def __init__(self, results, run_id=1):
+        self.id = run_id
+        self.results = results
+        self.started_at = None
+
+
+def observation_of(*resources):
+    return fr.observe(list(resources))
+
+
+def test_observations_are_found_where_the_scan_actually_writes_them():
+    """A scan stores one summary per workspace and the observations live inside
+    them. Read from the top level, they are invisible."""
+    run = FakeRun({"workspaces": [{"field_observations": observation_of(cluster())}]})
+
+    found = fr.run_observations(run)
+
+    assert found is not None
+    assert found["resource_types"]["cluster"]["resource_count"] == 1
+
+
+def test_a_run_with_no_observations_reads_as_none():
+    """Distinct from a scan that ran and found no drift, and the caller says
+    which."""
+    assert fr.run_observations(FakeRun({"workspaces": [{"violations": 3}]})) is None
+    assert fr.run_observations(FakeRun({})) is None
+
+
+def test_a_top_level_aggregate_is_still_read():
+    """Older runs, and any future caller that writes one aggregate per run."""
+    run = FakeRun({"field_observations": observation_of(cluster())})
+    assert fr.run_observations(run)["resource_types"]["cluster"]["resource_count"] == 1
+
+
+def test_every_workspace_in_a_run_is_counted():
+    run = FakeRun(
+        {
+            "workspaces": [
+                {"field_observations": observation_of(cluster(id="a"))},
+                {"field_observations": observation_of(cluster(id="b"), cluster(id="c"))},
+            ]
+        }
+    )
+    assert fr.run_observations(run)["resource_types"]["cluster"]["resource_count"] == 3
+
+
+def test_a_field_set_in_one_workspace_is_not_missing_from_the_estate():
+    """The whole reason the workspaces are merged before being judged. Reconciled
+    one at a time, every optional field the larger estate uses would be reported
+    as drift in the smaller one."""
+    merged = fr.merge(
+        [
+            observation_of(cluster(policy_id="E01")),
+            observation_of({"id": "b", "type": "cluster", "name": "n"}),
+        ]
+    )
+    stats = merged["resource_types"]["cluster"]["fields"]["policy_id"]
+    assert stats["present"] == 1
+    assert stats["populated"] == 1
+
+
+def test_merging_unions_the_values_each_workspace_saw():
+    merged = fr.merge(
+        [
+            observation_of(cluster(access_mode="USER_ISOLATION")),
+            observation_of(cluster(access_mode="SINGLE_USER")),
+        ]
+    )
+    values = merged["resource_types"]["cluster"]["fields"]["access_mode"]["values"]
+    assert sorted(values) == ["SINGLE_USER", "USER_ISOLATION"]
+
+
+def test_unbounded_in_one_workspace_is_unbounded_overall():
+    """We stopped recording there, so a literal missing from the union is no
+    longer evidence that the estate never produces it — and treating it as
+    evidence would report a working rule as impossible."""
+    crowded = fr.observe(
+        [cluster(id=str(n), access_mode=f"MODE_{n}") for n in range(40)]
+    )
+    merged = fr.merge([crowded, observation_of(cluster(access_mode="USER_ISOLATION"))])
+
+    stats = merged["resource_types"]["cluster"]["fields"]["access_mode"]
+    assert stats["too_many_values"] is True
+    assert stats["values"] == []
+
+
+def test_merging_nothing_is_empty_rather_than_an_error():
+    assert fr.merge([]) == {"resource_types": {}}

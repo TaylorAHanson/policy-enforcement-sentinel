@@ -421,6 +421,81 @@ def policy_sources() -> Dict[str, Dict[str, str]]:
     return sources
 
 
+def merge(observations: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+    """Fold several :func:`observe` aggregates into one.
+
+    A scan walks every configured workspace and each produces its own
+    aggregate, but ``discovered_fields`` is one declaration for all of them. A
+    field set in one workspace and absent from another is collected, not
+    missing, so the aggregates have to be added up before being judged —
+    reconciling them one at a time would report drift in the smaller estate for
+    every optional field the larger one happens to use.
+    """
+    merged: Dict[str, Any] = {}
+
+    for observation in observations:
+        for resource_type, entry in (observation.get("resource_types") or {}).items():
+            into = merged.setdefault(resource_type, {"resource_count": 0, "fields": {}})
+            into["resource_count"] += int(entry.get("resource_count", 0) or 0)
+
+            for field, stats in (entry.get("fields") or {}).items():
+                target = into["fields"].setdefault(
+                    field,
+                    {"present": 0, "populated": 0, "values": [], "too_many_values": False},
+                )
+                target["present"] += int(stats.get("present", 0) or 0)
+                target["populated"] += int(stats.get("populated", 0) or 0)
+
+                # An unbounded field in any one workspace is unbounded overall:
+                # we stopped recording there, so a literal missing from the
+                # union is no longer evidence that the estate never produces it.
+                if stats.get("too_many_values") or target["too_many_values"]:
+                    target["too_many_values"] = True
+                    target["values"] = []
+                    continue
+
+                values = set(target["values"]) | set(stats.get("values") or [])
+                if len(values) > _MAX_DISTINCT_VALUES:
+                    target["too_many_values"] = True
+                    target["values"] = []
+                else:
+                    target["values"] = sorted(values, key=lambda v: (str(type(v)), str(v)))
+
+    return {"resource_types": merged}
+
+
+def run_observations(run) -> Optional[Dict[str, Any]]:
+    """The field observations recorded on one run, across all its workspaces.
+
+    A scan stores a summary per workspace under ``workspaces`` and the
+    observations live there, one aggregate each. This originally read a
+    top-level ``field_observations`` that nothing ever wrote, so the drift
+    report said "no scan has recorded this yet" through two real scans that had
+    recorded it perfectly well.
+
+    Worth stating plainly, because it is the failure this module exists to
+    catch, one level up: the check reported *nothing to see* while the evidence
+    sat one key away. A check that fails in the reassuring direction is worse
+    than no check, and this one was reviewing its own kind of bug.
+    """
+    results = run.results or {}
+
+    per_workspace = [
+        summary["field_observations"]
+        for summary in (results.get("workspaces") or [])
+        if isinstance(summary, dict) and summary.get("field_observations")
+    ]
+    # Older runs, and any future caller that writes one aggregate for the run.
+    top_level = results.get("field_observations")
+    if top_level:
+        per_workspace.append(top_level)
+
+    if not per_workspace:
+        return None
+    merged = merge(per_workspace)
+    return merged if merged["resource_types"] else None
+
+
 def latest_observations(db) -> Optional[Dict[str, Any]]:
     """Field observations from the most recent scan that recorded any.
 
@@ -436,10 +511,10 @@ def latest_observations(db) -> Optional[Dict[str, Any]]:
         .all()
     )
     for run in runs:
-        observations = (run.results or {}).get("field_observations")
-        if observations and observations.get("resource_types"):
+        observations = run_observations(run)
+        if observations:
             return {
-                "run_id": run.run_id,
+                "run_id": run.id,
                 "started_at": run.started_at.isoformat() if run.started_at else None,
                 "observations": observations,
             }
