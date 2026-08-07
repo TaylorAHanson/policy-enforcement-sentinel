@@ -29,6 +29,7 @@ import {
 } from "../components/ui";
 import { RuleHealth } from "../components/policy/RuleHealth";
 import { CatalogueDrift } from "../components/policy/CatalogueDrift";
+import { CapturesPanel } from "../components/policy/CapturesPanel";
 import api, {
   type CaptureResult,
   type CoverageReport,
@@ -123,6 +124,7 @@ function FixturePanel() {
   const [running, setRunning] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [captured, setCaptured] = useState<CaptureResult | null>(null);
+  const [capturesKey, setCapturesKey] = useState(0);
   const [coverage, setCoverage] = useState<CoverageReport | null>(null);
   const [drift, setDrift] = useState<DriftReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -170,6 +172,9 @@ function FixturePanel() {
     try {
       const result = await api.testing.capture({ limit: 25 });
       setCaptured(result);
+      // Remount the captures panel so newly written ones appear. They land in a
+      // gitignored directory, so this is safe to press repeatedly.
+      setCapturesKey((k) => k + 1);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -258,6 +263,11 @@ function FixturePanel() {
       {/* Standing coverage, folded. It moves once a week and most of it is not
           the reader's to act on; only the rules that look broken are hoisted. */}
       {coverage && <CoverageFold coverage={coverage} />}
+
+      {/* Captures, and the one door from them into the committed set. Below the
+          coverage fold because most visits are not about promoting anything,
+          and above the test list because it is about which tests exist. */}
+      <CapturesPanel key={capturesKey} />
 
       <ContextStrip run={run} drift={drift} captured={captured} />
 

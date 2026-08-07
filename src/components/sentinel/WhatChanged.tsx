@@ -43,7 +43,7 @@ const GROUPS: {
     key: "appeared",
     label: (n) => `${n} appeared`,
     detail:
-      "Not true at the last scan and true now. The shortest list on this page and the only one that is genuinely news.",
+      "Not true at the previous scan and true at this one. Nothing else here is new information about the estate.",
     tone: "danger",
     icon: <ArrowUpRight className="size-3.5" />,
   },
@@ -96,18 +96,22 @@ const TONE: Record<string, string> = {
   muted: "text-content-muted",
 };
 
+/** One date format for the whole panel. It previously ran "Aug 6, 04:03 PM" in
+ *  the heading and "8/4/2026" in the rows, which reads as two different kinds
+ *  of date rather than as the same kind at two precisions. */
+function formatWhen(value: string | null | undefined, withTime = true): string {
+  if (!value) return "an earlier scan";
+  return new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
+  });
+}
+
 export function WhatChanged({ changes }: { changes: FindingChanges }) {
   if (!changes.available) return null;
 
   const groups = GROUPS.filter((g) => (changes[g.key] as TrackedGroup).count > 0);
-  const since = changes.compared_to_at
-    ? new Date(changes.compared_to_at).toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : null;
 
   return (
     <div className="rounded-md border border-border bg-surface-raised/40 p-3">
@@ -126,11 +130,17 @@ export function WhatChanged({ changes }: { changes: FindingChanges }) {
             </>
           ) : (
             <>
-              since the scan on {since}. {changes.open.toLocaleString()} findings
-              are open in total.
+              {/* No total here. The Violations card below owns that number, and
+                  a second one at a different scope 200px away reads as one of
+                  them being wrong rather than as two different questions. */}
+              in the scan on {formatWhen(changes.scanned_at)}, against the one
+              before it on {formatWhen(changes.compared_to_at)}
             </>
           )}
         </span>
+        {changes.is_latest === false && (
+          <Badge variant="outline">not the latest scan</Badge>
+        )}
       </div>
 
       {!changes.is_first_scan && !groups.length && (
@@ -250,7 +260,7 @@ function Oldest({ group }: { group: TrackedGroup }) {
                   {" "}
                   &mdash; {item.resource_type}/{item.resource_name}
                   {item.first_seen_at &&
-                    ` · since ${new Date(item.first_seen_at).toLocaleDateString()}`}
+                    ` · since ${formatWhen(item.first_seen_at, false)}`}
                 </span>
               </span>
             </li>

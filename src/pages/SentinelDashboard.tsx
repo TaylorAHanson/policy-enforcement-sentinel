@@ -43,17 +43,43 @@ export default function SentinelDashboard() {
 
   useEffect(() => {
     void store.loadRuns();
-    // Best effort. The delta is the most useful thing on the page but the least
-    // essential: if it cannot be computed the dashboard still works, and an
-    // error banner about a summary would be worse than its absence.
-    api.sentinel
-      .changes()
-      .then(setChanges)
-      .catch(() => setChanges(null));
     // Only on mount: loadRuns reads its own filters from the store, so adding
     // it as a dependency would refetch on every keystroke in the search box.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** The run the panel describes: the selection, or the newest completed scan
+   *  when nothing is selected.
+   *
+   *  Derived rather than read from `selectedRunId` directly, because that stays
+   *  null until somebody clicks a row. Keyed off it alone, the panel loaded once
+   *  and then sat there — a scan would finish, the run table and the cards would
+   *  update around it, and it would still be describing the scan before. */
+  const describedRunId = useMemo(() => {
+    if (store.selectedRunId) return store.selectedRunId;
+    const completed = store.runs
+      .filter((r) => r.status === "completed")
+      .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""));
+    return completed[0]?.id ?? null;
+  }, [store.selectedRunId, store.runs]);
+
+  useEffect(() => {
+    // Follows the described run. Pinned to the newest scan it sat above cards
+    // describing a different one, so the panel could say 3,789 open while the
+    // Violations card said 3,041 — both correct, and nothing on screen saying
+    // they were answering about different scans.
+    //
+    // Best effort: if the delta cannot be computed the dashboard still works,
+    // and an error banner about a summary is worse than its absence.
+    let current = true;
+    api.sentinel
+      .changes(describedRunId ?? undefined)
+      .then((data) => current && setChanges(data))
+      .catch(() => current && setChanges(null));
+    return () => {
+      current = false;
+    };
+  }, [describedRunId]);
 
   const hasRunningScan = useMemo(
     () => store.runs.some((run) => run.status === "running"),

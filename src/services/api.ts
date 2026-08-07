@@ -236,7 +236,10 @@ export interface FindingChanges {
   compared_to?: string | null;
   compared_to_at?: string | null;
   is_first_scan?: boolean;
-  open: number;
+  /** False when viewing an older run, so the panel can say so. */
+  is_latest?: boolean;
+  /** Open across the whole estate *now*, not at the requested run. */
+  open_now: number;
   appeared: TrackedGroup;
   returned: TrackedGroup;
   fixed: TrackedGroup;
@@ -478,6 +481,8 @@ export interface SyntheticFixture {
   environment: string;
   /** "captured" for fixtures taken from a real scan, "authored" otherwise. */
   source: string;
+  /** Loaded from the gitignored captures directory: local, and never shipped. */
+  captured?: boolean;
   expects_fires: string[];
   expects_passes: string[];
 }
@@ -730,6 +735,54 @@ export interface CaptureResult {
   note: string;
 }
 
+/** One value promotion would replace on the way into the committed set. */
+export interface Replacement {
+  path: string;
+  from: string;
+  to: string;
+}
+
+/** An identifying value that survived scrubbing, which blocks promotion. */
+export interface Survivor {
+  path: string;
+  value: string;
+  token: string;
+}
+
+export interface Capture {
+  name: string;
+  resource_type: string;
+  expects_fires: string[];
+  expects_passes: string[];
+  /** What the promoted file would be called. */
+  target_name?: string;
+  replacements?: Replacement[];
+  survivors?: Survivor[];
+  /** Rules dropped from `passes` because they are already known to be broken. */
+  withheld?: string[];
+  error?: string;
+}
+
+export interface CaptureList {
+  captures: Capture[];
+  count: number;
+  directory: string;
+}
+
+export interface PromotionResult {
+  name: string;
+  path: string;
+  replacements: Replacement[];
+  survivors: Survivor[];
+  withheld: string[];
+  verification: {
+    passed: boolean;
+    error: string | null;
+    unexpected: string[];
+    missing: string[];
+  } | null;
+}
+
 export interface PytestCase {
   name: string;
   classname: string;
@@ -932,8 +985,14 @@ export const api = {
     facets: (runId: string, filters?: FindingFilters) =>
       get<Facets>(`/sentinel/runs/${runId}/facets`, filters),
 
-    /** What changed since the previous scan, rather than what is wrong now. */
-    changes: () => get<FindingChanges>("/sentinel/changes"),
+    /**
+     * What changed at one scan, rather than what is wrong now.
+     *
+     * Takes the run so the panel follows whatever the dashboard has selected.
+     * Pinned to the newest scan it contradicted the stat cards beside it.
+     */
+    changes: (runId?: string) =>
+      get<FindingChanges>("/sentinel/changes", runId ? { run_id: runId } : undefined),
 
     /**
      * Starts one run across every selected workspace. A single `run_id` covers
@@ -1237,6 +1296,21 @@ export const api = {
       limit?: number;
       anonymise?: boolean;
     }) => post<CaptureResult>("/testing/capture", body ?? {}),
+
+    /** The local captures, and what promoting each of them would write. */
+    captures: () => get<CaptureList>("/testing/captures"),
+
+    /**
+     * Scrubs a capture's names and moves it into the committed tests.
+     *
+     * Fails closed with a 422 when an identifying value survives scrubbing, or
+     * when replacing the names changed what the policies do to the resource.
+     */
+    promote: (name: string, body?: { target_name?: string }) =>
+      post<PromotionResult>(
+        `/testing/captures/${encodeURIComponent(name)}/promote`,
+        body ?? {},
+      ),
 
     suites: () =>
       get<{ suites: { name: string; path: string; available: boolean }[] }>(

@@ -476,6 +476,17 @@ async def test_one_workspace_failing_does_not_sink_the_others(monkeypatch, app_d
 
     monkeypatch.setattr(SentinelService, "scan_workspace", fake_scan)
 
+    # `scan_workspaces` constructs a service per workspace before calling the
+    # method above, and the constructor builds a real Databricks client. Faking
+    # only `scan_workspace` left that constructor doing live OAuth against three
+    # workspaces: with a token cached the suite ran in fifty seconds, and
+    # without one it took fifteen minutes and then failed here on a five-minute
+    # auth timeout that had nothing to do with what this test asserts.
+    #
+    # The other tests in this file dodge it with `__new__`. This one goes
+    # through `scan_workspaces`, so the constructor is what has to be neutered.
+    monkeypatch.setattr(SentinelService, "__init__", lambda self, config=None: None)
+
     results = await sentinel_service.scan_workspaces(
         [
             {"name": "good-1", "environment": "prod"},

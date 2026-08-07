@@ -1,0 +1,25 @@
+{
+  "description": "A real storage as the Databricks API returns it, with the names replaced. The shape is the point: the exact spellings, the nulls, and which keys arrive at all.",
+  "workspace": "ws-enterprise-prod",
+  "environment": "prod",
+  "source": "promoted",
+  "resource": {
+    "id": "main.analytics.name-1",
+    "name": "name-1",
+    "type": "storage",
+    "storage_type": "VolumeType.MANAGED",
+    "owner": "owner@example.com",
+    "catalog": "main",
+    "schema": "analytics",
+    "tags": {}
+  },
+  "expect": {
+    "fires": [
+      "CTL-VOL-003"
+    ],
+    "passes": [
+      "CTL-VOL-004",
+      "SEC-VOL-002"
+    ]
+  }
+}

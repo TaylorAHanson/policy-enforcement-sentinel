@@ -384,3 +384,125 @@ def test_a_failed_workspace_covers_nothing(db_session):
     db_session.commit()
 
     assert len(fl.ScanCoverage.from_run(run, [])) == 0
+
+
+# --- Which scan the summary describes ---------------------------------------
+#
+# The panel was pinned to the newest scan while the stat cards beside it
+# described whichever run was selected. Both sets of numbers were correct and
+# they contradicted each other on one screen, with nothing saying why — the
+# panel reading "3,789 open" above a Violations card reading "3,041".
+
+
+def three_scans(db):
+    """Three runs: a finding appears at r1, is fixed at r2, comes back at r3."""
+    runs = []
+    for day, kind in enumerate(["violation", "check", "violation"]):
+        run = add_run(db, f"r{day}", offset_days=day)
+        add_finding(db, f"r{day}", kind=kind)
+        fl.reconcile_run(db, run)
+        runs.append(run)
+    return runs
+
+
+def test_the_summary_describes_the_newest_scan_by_default(db_session):
+    three_scans(db_session)
+    result = fl.summary(db_session)
+
+    assert result["is_latest"] is True
+    assert result["returned"]["count"] == 1, "the relapse happened at the newest scan"
+
+
+def test_a_named_scan_reports_its_own_facts(db_session):
+    runs = three_scans(db_session)
+
+    # runs[0] is the first scan, which reports no changes by design.
+    fixed_at = fl.summary(db_session, run_id=runs[1].id)
+    returned_at = fl.summary(db_session, run_id=runs[2].id)
+
+    assert returned_at["returned"]["count"] == 1
+    assert returned_at["fixed"]["count"] == 0
+    # And not the relapse, which belongs to the scan that saw it.
+    assert fixed_at["returned"]["count"] == 0
+
+
+def test_a_past_scans_fix_is_forgotten_once_the_finding_relapses(db_session):
+    """A known limit, pinned so it is a decision rather than a surprise.
+
+    The state table holds each finding's current position, not an event log, so
+    reopening clears the record of which scan closed it. Scan 8 fixed it and
+    scan 9 saw it again: scan 8's "fixed" count drops to zero.
+
+    This under-reports how much a past scan moved and can never over-report it,
+    and the newest scan — where the dashboard opens — is unaffected. Making it
+    exact means storing one row per finding per scan.
+    """
+    runs = three_scans(db_session)
+
+    assert fl.summary(db_session, run_id=runs[1].id)["fixed"]["count"] == 0
+    assert state_of(db_session).reopened == 1, "it did relapse; that is why"
+
+
+def test_an_older_scan_says_it_is_not_the_latest(db_session):
+    """So the panel can label itself rather than quietly describing a different
+    run from the cards beside it."""
+    runs = three_scans(db_session)
+    assert fl.summary(db_session, run_id=runs[0].id)["is_latest"] is False
+
+
+def test_a_scan_compares_against_the_one_before_it_not_the_newest(db_session):
+    runs = three_scans(db_session)
+    assert fl.summary(db_session, run_id=runs[1].id)["compared_to"] == runs[0].id
+
+
+def test_what_a_past_scan_changed_does_not_change(db_session):
+    """A fact about a finished scan. If it moved as new scans arrived, the
+    history would be unreadable and nobody could cite it."""
+    runs = three_scans(db_session)
+    before = fl.summary(db_session, run_id=runs[2].id)["returned"]
+    assert before["count"] == 1, "guard: the test needs something to preserve"
+
+    later = add_run(db_session, "r9", offset_days=9)
+    add_finding(db_session, "r9", resource_id="c-2")
+    fl.reconcile_run(db_session, later)
+
+    after = fl.summary(db_session, run_id=runs[2].id)["returned"]
+
+    # Which findings, not every field on them: last_evaluated_at rightly moves
+    # each time a later scan looks at the same resource again.
+    assert after["count"] == before["count"]
+    assert [i["fingerprint"] for i in after["items"]] == [
+        i["fingerprint"] for i in before["items"]
+    ]
+
+
+def test_staleness_is_only_asked_of_the_newest_scan(db_session):
+    """"Nothing has confirmed this lately" is a claim about now. Asked of a scan
+    from March it would report every finding as unconfirmed, which is true and
+    useless."""
+    runs = three_scans(db_session)
+    assert fl.summary(db_session, run_id=runs[0].id)["unconfirmed"]["count"] == 0
+
+
+def test_an_unknown_scan_is_unavailable_rather_than_the_latest(db_session):
+    """Falling back to the newest run would put the wrong scan's numbers under a
+    heading naming the one that was asked for."""
+    three_scans(db_session)
+    result = fl.summary(db_session, run_id="does-not-exist")
+
+    assert result["available"] is False
+    assert "history" in result["reason"]
+
+
+def test_the_first_scan_reports_no_changes(db_session):
+    """Everything is new at the first scan, and calling 3,789 findings "new"
+    would make the one number that matters meaningless on the day it matters
+    most."""
+    run = add_run(db_session, "r1")
+    add_finding(db_session, "r1")
+    fl.reconcile_run(db_session, run)
+
+    result = fl.summary(db_session)
+    assert result["is_first_scan"] is True
+    assert result["appeared"]["count"] == 0
+    assert result["open_now"] == 1

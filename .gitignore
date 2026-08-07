@@ -257,3 +257,11 @@ package-lock.json
 # Screenshots taken while checking a UI change. Useful in the moment, and they
 # are pictures of a real workspace's resource names.
 .screenshots/
+
+# Policy tests captured from a real scan. Each one is a resource document from
+# somebody's production estate, named after their catalogs and volumes, so these
+# are local to whoever pressed Capture and are never committed. Promoting one
+# (Testing → Captures → Promote) scrubs the names and writes a new file into
+# backend/fixtures/synthetic/, which is the committed set.
+backend/fixtures/captured/*
+!backend/fixtures/captured/README.md

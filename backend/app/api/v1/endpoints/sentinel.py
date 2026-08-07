@@ -285,16 +285,24 @@ async def get_run_facets(
 
 
 @router.get("/changes")
-async def changes(db: Session = Depends(get_db)):
-    """What changed since the previous scan.
+async def changes(
+    run_id: Optional[str] = Query(None, description="Defaults to the most recent scan."),
+    db: Session = Depends(get_db),
+):
+    """What changed at one scan, relative to the one before it.
 
     Every other view here is scoped to one run and answers "what is wrong",
     which on a real estate is 3,789 violations that have barely moved in a
     month. Nobody triages that. This answers "what changed", which on the same
     estate is one new finding — a number somebody can actually act on.
+
+    ``run_id`` follows whichever run the dashboard has selected. Without it the
+    panel described the newest scan while the cards beside it described an older
+    one, which is two sets of correct numbers contradicting each other on one
+    screen.
     """
     try:
-        return finding_lifecycle.summary(db)
+        return finding_lifecycle.summary(db, run_id=run_id)
     except Exception as e:
         logger.exception("Could not summarise finding changes.")
         raise HTTPException(status_code=500, detail=str(e))

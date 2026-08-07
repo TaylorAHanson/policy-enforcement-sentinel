@@ -17,7 +17,10 @@ from app.services import resource_schema, synthetic_estate
 
 @pytest.fixture(scope="module")
 def shipped():
-    return synthetic_estate.load_fixtures()
+    # Shipped only, as the name says. Including local captures would make these
+    # assertions depend on whose machine is running them, and pass or fail based
+    # on whether somebody had pressed Capture that morning.
+    return synthetic_estate.load_fixtures(include_captures=False)
 
 
 def test_there_are_fixtures_for_more_than_one_resource_type(shipped):

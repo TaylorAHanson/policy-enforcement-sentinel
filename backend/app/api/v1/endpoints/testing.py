@@ -54,6 +54,14 @@ class CaptureRequest(BaseModel):
     anonymise: bool = True
 
 
+class PromoteRequest(BaseModel):
+    #: Defaults to a name describing what the test demonstrates.
+    target_name: Optional[str] = None
+    #: Write it even though identifying values survived scrubbing. Deliberately
+    #: awkward to reach: there is no UI for it.
+    allow_survivors: bool = False
+
+
 class PytestRequest(BaseModel):
     suite: str = "all"
     #: Passed to pytest's -k. Handy for re-running one failure.
@@ -73,12 +81,14 @@ def list_fixtures():
                 "workspace": f.workspace,
                 "environment": f.environment,
                 "source": f.source,
+                "captured": f.captured,
                 "expects_fires": f.fires,
                 "expects_passes": f.passes,
             }
             for f in fixtures
         ],
         "directory": synthetic_estate.fixtures_dir(),
+        "captures_directory": synthetic_estate.captures_dir(),
     }
 
 
@@ -181,12 +191,74 @@ def capture(payload: Optional[CaptureRequest] = None, db: Session = Depends(get_
     return {
         "captured": written,
         "count": len(written),
-        "directory": synthetic_estate.fixtures_dir(),
+        "directory": synthetic_estate.captures_dir(),
         "note": (
-            "These record what the policies do today, including anything they "
-            "get wrong. Read them before opening a pull request."
+            "Local and gitignored. These record what the policies do today, "
+            "including anything they get wrong, and they are named after real "
+            "resources. Promote one to scrub the names and ship it."
         ),
     }
+
+
+@router.get("/captures")
+def list_captures():
+    """The local captures, and what promoting each would write.
+
+    The plan is computed per capture so the page can show what would change
+    before anybody commits to it, and can grey out the ones that would be
+    refused.
+    """
+    out = []
+    # Grows as the list is planned, so two captures never propose the same name.
+    taken = synthetic_estate._shipped_names()
+    for fixture in synthetic_estate.load_fixtures(
+        synthetic_estate.captures_dir()
+    ):
+        entry = {
+            "name": fixture.name,
+            "resource_type": fixture.resource_type,
+            "expects_fires": fixture.fires,
+            "expects_passes": fixture.passes,
+        }
+        try:
+            plan = synthetic_estate.plan_promotion(fixture.name, taken=taken)
+            taken.add(plan["target_name"])
+            entry["target_name"] = plan["target_name"]
+            entry["replacements"] = plan["replacements"]
+            entry["survivors"] = plan["survivors"]
+            entry["withheld"] = plan["withheld"]
+        except synthetic_estate.FixtureError as e:
+            entry["error"] = str(e)
+        out.append(entry)
+
+    return {
+        "captures": out,
+        "count": len(out),
+        "directory": synthetic_estate.captures_dir(),
+    }
+
+
+@router.post("/captures/{name}/promote")
+async def promote_capture(name: str, payload: Optional[PromoteRequest] = None):
+    """Scrub a capture's names and move it into the shipped tests.
+
+    The one path from a real estate into a committed file, so it fails closed:
+    it refuses if an identifying word survived scrubbing, and it refuses if
+    replacing the names changed what the policies do to the resource.
+    """
+    payload = payload or PromoteRequest()
+    try:
+        return await synthetic_estate.promote(
+            name,
+            target_name=payload.target_name,
+            allow_survivors=payload.allow_survivors,
+        )
+    except synthetic_estate.FixtureError as e:
+        # 422, not 502: the request was understood and deliberately refused.
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("Promoting a capture failed.")
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.get("/suites")

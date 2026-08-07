@@ -425,14 +425,38 @@ def backfill(db, *, limit: int = 200) -> Dict[str, Any]:
 STALE_AFTER_SCANS = 2
 
 
-def summary(db, *, stale_after: int = STALE_AFTER_SCANS) -> Dict[str, Any]:
-    """What changed, for the top of the dashboard.
+def summary(
+    db,
+    *,
+    run_id: Optional[str] = None,
+    stale_after: int = STALE_AFTER_SCANS,
+) -> Dict[str, Any]:
+    """What changed at one scan, for the top of the dashboard.
 
     The standing total is deliberately not the headline. It is four digits, it
     has not moved in a month, and leading with it is what makes the page
     unreadable: everything looks equally urgent and equally old. What somebody
     can act on is the handful that appeared since last time, the ones that came
     back after being fixed, and the ones nobody has touched the longest.
+
+    ``run_id`` selects which scan to describe, defaulting to the most recent.
+    It exists because the dashboard lets you select an older run, and a panel
+    pinned to the newest scan sitting above cards describing a different one is
+    two contradictory sets of numbers on one screen with nothing saying why.
+
+    Two caveats about older runs, both consequences of this table holding each
+    finding's *current* position rather than an event log:
+
+    ``unconfirmed`` is only asked of the newest scan. "Nothing has confirmed
+    this lately" is a claim about now; asked of a scan from March it would
+    report the whole estate, truthfully and uselessly.
+
+    ``fixed`` and ``returned`` for a past scan report only what is still true.
+    A finding fixed at scan 8 that came back at scan 9 no longer counts toward
+    scan 8's ``fixed``, because reopening clears ``resolved_run``. So a past
+    scan can under-report how much moved, never over-report, and the newest
+    scan — the one the dashboard opens on — is always exact. ``appeared`` has
+    no such caveat: ``first_seen_run`` is written once and never cleared.
     """
     from app.db.sentinel_run import SentinelRunModel
 
@@ -440,7 +464,6 @@ def summary(db, *, stale_after: int = STALE_AFTER_SCANS) -> Dict[str, Any]:
         db.query(SentinelRunModel)
         .filter(SentinelRunModel.status == "completed")
         .order_by(SentinelRunModel.started_at.desc())
-        .limit(stale_after + 1)
         .all()
     )
     if not runs:
@@ -449,34 +472,51 @@ def summary(db, *, stale_after: int = STALE_AFTER_SCANS) -> Dict[str, Any]:
             "reason": "No scan has completed yet, so there is nothing to compare.",
         }
 
-    latest = runs[0]
-    previous = runs[1] if len(runs) > 1 else None
-    cutoff = runs[-1].started_at if len(runs) > stale_after else None
+    index = 0
+    if run_id:
+        index = next((i for i, r in enumerate(runs) if r.id == run_id), -1)
+        if index < 0:
+            return {
+                "available": False,
+                "reason": "That scan is not in the history, so there is nothing to compare.",
+            }
+
+    selected = runs[index]
+    previous = runs[index + 1] if index + 1 < len(runs) else None
+    is_latest = index == 0
+    cutoff = (
+        runs[stale_after].started_at
+        if is_latest and len(runs) > stale_after
+        else None
+    )
 
     states = db.query(SentinelFindingStateModel).all()
     open_states = [s for s in states if s.status == STATUS_OPEN]
 
-    def since_previous(predicate) -> List[SentinelFindingStateModel]:
+    def at_this_run(predicate) -> List[SentinelFindingStateModel]:
         if previous is None:
             return []
         return [s for s in states if predicate(s)]
 
-    appeared = since_previous(lambda s: s.first_seen_run == latest.id and s.status == STATUS_OPEN)
-    returned = since_previous(
-        lambda s: s.last_seen_run == latest.id and (s.reopened or 0) > 0 and s.first_seen_run != latest.id
+    appeared = at_this_run(lambda s: s.first_seen_run == selected.id)
+    returned = at_this_run(
+        lambda s: s.last_seen_run == selected.id
+        and (s.reopened or 0) > 0
+        and s.first_seen_run != selected.id
     )
-    fixed = since_previous(
-        lambda s: s.resolved_run == latest.id and s.resolution == RESOLUTION_FIXED
+    fixed = at_this_run(
+        lambda s: s.resolved_run == selected.id and s.resolution == RESOLUTION_FIXED
     )
-    gone = since_previous(
-        lambda s: s.resolved_run == latest.id and s.resolution == RESOLUTION_RESOURCE_GONE
+    gone = at_this_run(
+        lambda s: s.resolved_run == selected.id and s.resolution == RESOLUTION_RESOURCE_GONE
     )
-    unasked = since_previous(
-        lambda s: s.resolved_run == latest.id and s.resolution == RESOLUTION_NOT_EVALUATED
+    unasked = at_this_run(
+        lambda s: s.resolved_run == selected.id and s.resolution == RESOLUTION_NOT_EVALUATED
     )
 
     # Open, and not confirmed by the last few scans. Distinct from "still a
-    # problem": nobody has been able to look.
+    # problem": nobody has been able to look. Only asked of the newest scan,
+    # because "nothing has confirmed this lately" is a claim about the present.
     unconfirmed = [
         s
         for s in open_states
@@ -486,14 +526,20 @@ def summary(db, *, stale_after: int = STALE_AFTER_SCANS) -> Dict[str, Any]:
 
     return {
         "available": True,
-        "run_id": latest.id,
-        "scanned_at": latest.started_at.isoformat() if latest.started_at else None,
+        "run_id": selected.id,
+        "scanned_at": selected.started_at.isoformat() if selected.started_at else None,
         "compared_to": previous.id if previous else None,
         "compared_to_at": (
             previous.started_at.isoformat() if previous and previous.started_at else None
         ),
         "is_first_scan": previous is None,
-        "open": len(open_states),
+        "is_latest": is_latest,
+        #: Open *now*, across the whole estate. Deliberately not named ``open``:
+        #: sitting among per-run counts, that reads as "open at this scan",
+        #: which is not recoverable from current state and is a different number
+        #: for every run but this one. Rendering it beside a run's violation
+        #: count is what put two contradictory totals on the dashboard.
+        "open_now": len(open_states),
         "appeared": _brief(appeared),
         "returned": _brief(returned),
         "fixed": _brief(fixed),
