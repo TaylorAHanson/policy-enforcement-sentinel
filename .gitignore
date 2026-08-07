@@ -122,19 +122,32 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
+
+# Python build artefacts, scoped to backend/ — the only Python root here.
+#
+# These came from the stock Python template, where they are unanchored and so
+# match a directory of that name at *any* depth. `lib/` therefore excluded the
+# frontend's `src/lib/`, and because a gitignored file is silently absent rather
+# than reported, utils.ts, useAutoSize.ts and releaseSeen.ts were never
+# committed at all. Every deployment build then failed on fifteen copies of
+# "Cannot find module '../../lib/utils'" while the files sat present locally,
+# which is why it looked like a build problem rather than a missing file.
+#
+# `build/`, `dist/`, `var/` and `parts/` are equally ordinary frontend
+# directory names and were one `src/` folder away from doing the same thing.
+backend/build/
+backend/develop-eggs/
+backend/dist/
+backend/downloads/
+backend/eggs/
+backend/.eggs/
+backend/lib/
+backend/lib64/
+backend/parts/
+backend/sdist/
+backend/var/
+backend/wheels/
+backend/share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
