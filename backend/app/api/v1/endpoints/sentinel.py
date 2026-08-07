@@ -28,6 +28,7 @@ from app.db.enforcement_audit import EnforcementAuditModel
 from app.db.sentinel_finding import SentinelFindingModel
 from app.db.sentinel_run import SentinelRunModel
 from app.db.session import get_db, get_lakebase_session
+from app.services import finding_lifecycle
 from app.services.sentinel_service import (
     SentinelService,
     build_approval,
@@ -283,6 +284,39 @@ async def get_run_facets(
     }
 
 
+@router.get("/changes")
+async def changes(db: Session = Depends(get_db)):
+    """What changed since the previous scan.
+
+    Every other view here is scoped to one run and answers "what is wrong",
+    which on a real estate is 3,789 violations that have barely moved in a
+    month. Nobody triages that. This answers "what changed", which on the same
+    estate is one new finding — a number somebody can actually act on.
+    """
+    try:
+        return finding_lifecycle.summary(db)
+    except Exception as e:
+        logger.exception("Could not summarise finding changes.")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/changes/rebuild")
+async def rebuild_changes(db: Session = Depends(get_db)):
+    """Rebuild the lifecycle table from the findings log.
+
+    The table is derived, so it can always be reconstructed from the runs that
+    are already stored. That makes it safe to lose and worth being able to
+    repair without a scan — which matters on first upgrade, when the history is
+    sitting there and starting from empty would mean no trend data until two
+    more scans have happened.
+    """
+    try:
+        return finding_lifecycle.backfill(db)
+    except Exception as e:
+        logger.exception("Could not rebuild the finding lifecycle table.")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete("/runs")
 async def purge_runs(
     older_than_days: int = Query(30, ge=1), db: Session = Depends(get_db)
@@ -418,6 +452,21 @@ def _finish_run(run_id: str, result: Dict[str, Any]) -> None:
         }
         run.completed_at = datetime.datetime.utcnow()
         db.commit()
+
+        # Fold this run's findings into the lifecycle table, so the next thing
+        # anybody looks at can say what changed rather than restating a
+        # four-digit total that has not moved in weeks.
+        #
+        # Deliberately after the commit and in its own try: a failure here must
+        # not lose the run. The lifecycle table is derived and can be rebuilt
+        # from the findings log by `finding_lifecycle.backfill`, so losing it is
+        # recoverable in a way that losing a scan is not.
+        try:
+            counts = finding_lifecycle.reconcile_run(db, run)
+            logger.info("Run %s lifecycle: %s", run_id, counts)
+        except Exception as e:
+            logger.error("Could not reconcile findings for run %s: %s", run_id, e)
+            db.rollback()
     except Exception as e:
         logger.error("Could not record the completion of run %s: %s", run_id, e)
         db.rollback()

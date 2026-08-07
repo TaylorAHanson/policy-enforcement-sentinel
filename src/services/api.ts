@@ -194,6 +194,61 @@ export interface FindingsPage extends Paginated {
   findings: Finding[];
 }
 
+/** One tracked finding, as it stands across every scan that has seen it. */
+export interface TrackedFinding {
+  fingerprint: string;
+  policy_id: string | null;
+  resource_type: string | null;
+  resource_name: string | null;
+  resource_id: string | null;
+  workspace: string | null;
+  owner: string | null;
+  severity: string | null;
+  message: string | null;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  last_evaluated_at: string | null;
+  occurrences: number;
+  reopened: number;
+  resolution: string | null;
+}
+
+/** A count plus enough of a sample to tell whether it is worth opening. */
+export interface TrackedGroup {
+  count: number;
+  items: TrackedFinding[];
+}
+
+/**
+ * What changed since the previous scan.
+ *
+ * The three ways a finding can close are separate on purpose, because only one
+ * of them is somebody having done something. A resource deleted and a policy
+ * narrowed both make a finding go away while leaving the estate exactly as it
+ * was, and counting either as remediation would make the dashboard congratulate
+ * you for deletions and policy edits.
+ */
+export interface FindingChanges {
+  available: boolean;
+  reason?: string;
+  run_id?: string;
+  scanned_at?: string | null;
+  compared_to?: string | null;
+  compared_to_at?: string | null;
+  is_first_scan?: boolean;
+  open: number;
+  appeared: TrackedGroup;
+  returned: TrackedGroup;
+  fixed: TrackedGroup;
+  resource_gone: TrackedGroup;
+  no_longer_checked: TrackedGroup;
+  /** Open, and not confirmed by the last few scans. Nobody could look. */
+  unconfirmed: TrackedGroup;
+  oldest: TrackedGroup;
+  by_severity: { value: string; count: number }[];
+  by_resource_type: { value: string; count: number }[];
+}
+
 export interface FacetValue {
   value: string;
   count: number;
@@ -876,6 +931,9 @@ export const api = {
 
     facets: (runId: string, filters?: FindingFilters) =>
       get<Facets>(`/sentinel/runs/${runId}/facets`, filters),
+
+    /** What changed since the previous scan, rather than what is wrong now. */
+    changes: () => get<FindingChanges>("/sentinel/changes"),
 
     /**
      * Starts one run across every selected workspace. A single `run_id` covers

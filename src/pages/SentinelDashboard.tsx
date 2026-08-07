@@ -22,7 +22,8 @@ import { FindingDetail } from "../components/sentinel/FindingDetail";
 import { FindingsTable } from "../components/sentinel/FindingsTable";
 import { RunsTable } from "../components/sentinel/RunsTable";
 import { formatNumber, formatRelativeTime } from "../lib/utils";
-import type { Finding, ScanMode } from "../services/api";
+import api, { type Finding, type FindingChanges, type ScanMode } from "../services/api";
+import { WhatChanged } from "../components/sentinel/WhatChanged";
 import { useSentinelStore } from "../store/sentinelStore";
 import { useSettingsStore } from "../store/settingsStore";
 
@@ -38,9 +39,17 @@ export default function SentinelDashboard() {
   const [preflightOpen, setPreflightOpen] = useState(false);
   const [triggering, setTriggering] = useState(false);
   const [detailTab, setDetailTab] = useState<"findings" | "actions">("findings");
+  const [changes, setChanges] = useState<FindingChanges | null>(null);
 
   useEffect(() => {
     void store.loadRuns();
+    // Best effort. The delta is the most useful thing on the page but the least
+    // essential: if it cannot be computed the dashboard still works, and an
+    // error banner about a summary would be worse than its absence.
+    api.sentinel
+      .changes()
+      .then(setChanges)
+      .catch(() => setChanges(null));
     // Only on mount: loadRuns reads its own filters from the store, so adding
     // it as a dependency would refetch on every keystroke in the search box.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -140,6 +149,11 @@ export default function SentinelDashboard() {
           Destructive actions additionally require all five gates to agree.
         </Alert>
       )}
+
+      {/* Above the totals on purpose. The totals answer "what is wrong", which
+          is four digits and has not moved in weeks; this answers "what changed",
+          which is usually a handful and is the only part anybody can act on. */}
+      {changes && <WhatChanged changes={changes} />}
 
       {run && (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
